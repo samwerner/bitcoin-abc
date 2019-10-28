@@ -11,7 +11,7 @@
 
 GlobalConfig::GlobalConfig()
     : useCashAddr(false), nMaxBlockSize(DEFAULT_MAX_BLOCK_SIZE),
-      nBlockPriorityPercentage(DEFAULT_BLOCK_PRIORITY_PERCENTAGE) {}
+      nBlockPriorityPercentage(DEFAULT_BLOCK_PRIORITY_PERCENTAGE), timeLogger(false) {}
 
 bool GlobalConfig::SetMaxBlockSize(uint64_t maxBlockSize) {
     // Do not allow maxBlockSize to be set below historic 1MB limit
@@ -94,3 +94,12 @@ void GlobalConfig::SetRPCCORSDomain(std::string corsDomain) {
 std::string GlobalConfig::GetRPCCORSDomain() const {
     return rpcCORSDomain;
 }
+
+void GlobalConfig::SetTimeLogger(bool state) {
+    timeLogger = state;
+}
+
+bool GlobalConfig::GetTimeLogger() const {
+    return timeLogger;
+}
+

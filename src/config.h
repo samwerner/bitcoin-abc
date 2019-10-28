@@ -34,6 +34,8 @@ public:
     virtual std::string GetRPCUserAndPassword() const = 0;
     virtual void SetRPCCORSDomain(std::string corsDomain) = 0;
     virtual std::string GetRPCCORSDomain() const = 0;
+    virtual bool GetTimeLogger() const = 0;
+    virtual void SetTimeLogger(bool state) = 0;
 };
 
 class GlobalConfig final : public Config {
@@ -55,6 +57,9 @@ public:
     void SetRPCCORSDomain(std::string corsDomain) override;
     std::string GetRPCCORSDomain() const override;
 
+    bool GetTimeLogger() const override;
+    void SetTimeLogger(bool state) override;
+
 private:
     bool useCashAddr;
     Amount excessUTXOCharge;
@@ -70,6 +75,8 @@ private:
     /** The largest block size this node will accept. */
     uint64_t nMaxBlockSize;
     uint64_t nBlockPriorityPercentage;
+
+    bool timeLogger;
 };
 
 // Dummy for subclassing in unittests
@@ -98,6 +105,9 @@ public:
     std::string GetRPCUserAndPassword() const override { return ""; };
     void SetRPCCORSDomain(std::string corsDomain) override{};
     std::string GetRPCCORSDomain() const override { return ""; };
+
+    bool GetTimeLogger() const override { return false; }
+    void SetTimeLogger(bool state) override {}
 
 private:
     std::unique_ptr<CChainParams> chainParams;

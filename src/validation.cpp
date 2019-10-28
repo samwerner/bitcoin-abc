@@ -1173,6 +1173,7 @@ void static InvalidChainFound(CBlockIndex *pindexNew)
         pindexFinalized = pindexNew->pprev;
     }
 
+
     LogPrintf("%s: invalid block=%s  height=%d  log2_work=%.8g  date=%s\n",
               __func__, pindexNew->GetBlockHash().ToString(),
               pindexNew->nHeight,
@@ -2208,6 +2209,13 @@ static void UpdateTip(const Config &config, CBlockIndex *pindexNew) {
         LOCK(g_best_block_mutex);
         g_best_block = pindexNew->GetBlockHash();
         g_best_block_cv.notify_all();
+    }
+
+    if (config.GetTimeLogger()) {
+        GetLogger("timelog").LogPrintStr(tfm::format(
+                ",%d,%s\n",
+                pindexNew->nHeight,
+                FormatISO8601DateTime(pindexNew->GetBlockTime())));
     }
 
     LogPrintf(

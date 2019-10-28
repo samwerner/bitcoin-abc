@@ -75,6 +75,12 @@ private:
 
     std::string LogTimestampStr(const std::string &str);
 
+    std::string defaultFile;
+public:
+    const std::string &getDefaultFile() const;
+
+    void setDefaultFile(const std::string &defaultFile);
+
 public:
     bool m_print_to_console = false;
     bool m_print_to_file = true;
@@ -84,6 +90,7 @@ public:
 
     std::atomic<bool> m_reopen_file{false};
 
+    Logger();
     ~Logger();
 
     /** Send a string to the log output */
@@ -109,7 +116,7 @@ public:
 
 } // namespace BCLog
 
-BCLog::Logger &GetLogger();
+BCLog::Logger &GetLogger(const std::string& loggerName = "debug");
 
 /** Return true if log accepts specified category */
 static inline bool LogAcceptCategory(BCLog::LogFlags category) {

@@ -123,6 +123,9 @@ static bool AppInit(int argc, char *argv[]) {
             fprintf(stderr, "Error: %s\n", e.what());
             return false;
         }
+        if (gArgs.IsArgSet("-timelog")) {
+            config.SetTimeLogger(true);
+        }
 
         // Make sure we create the net-specific data directory early on: if it
         // is new, this has a side effect of also creating

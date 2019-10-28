@@ -4,6 +4,8 @@
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
+#include <unordered_map>
+
 #include <logging.h>
 
 #include <util/system.h>
@@ -25,9 +27,13 @@ const char *const DEFAULT_DEBUGLOGFILE = "debug.log";
  * This method of initialization was originally introduced in
  * ee3374234c60aba2cc4c5cd5cac1c0aefc2d817c.
  */
-BCLog::Logger &GetLogger() {
-    static BCLog::Logger *const logger = new BCLog::Logger();
-    return *logger;
+BCLog::Logger &GetLogger(const std::string& loggerName) {
+    // static BCLog::Logger *const logger = new BCLog::Logger();
+    static std::unordered_map<std::string, BCLog::Logger *const> loggers = {
+            {"debug", new BCLog::Logger()},
+            {"timelog", new BCLog::Logger()}
+    };
+    return *loggers.at(loggerName);
 }
 
 static int FileWriteStr(const std::string &str, FILE *fp) {
@@ -35,7 +41,7 @@ static int FileWriteStr(const std::string &str, FILE *fp) {
 }
 
 fs::path BCLog::Logger::GetDebugLogPath() {
-    fs::path logfile(gArgs.GetArg("-debuglogfile", DEFAULT_DEBUGLOGFILE));
+    fs::path logfile(gArgs.GetArg("-debuglogfile", defaultFile));
     return AbsPathForConfigVal(logfile);
 }
 
@@ -280,4 +286,14 @@ bool BCLog::Logger::WillLogCategory(LogFlags category) const {
 
 bool BCLog::Logger::DefaultShrinkDebugFile() const {
     return m_categories != BCLog::NONE;
+}
+
+BCLog::Logger::Logger() : defaultFile(DEFAULT_DEBUGLOGFILE) {}
+
+const std::string &BCLog::Logger::getDefaultFile() const {
+    return defaultFile;
+}
+
+void BCLog::Logger::setDefaultFile(const std::string& _defaultFile) {
+    defaultFile = _defaultFile;
 }

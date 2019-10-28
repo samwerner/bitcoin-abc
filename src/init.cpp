@@ -1009,6 +1009,8 @@ void SetupServerArgs() {
     gArgs.AddArg("-parkdeepreorg", "", false, OptionsCategory::HIDDEN);
     gArgs.AddArg("-replayprotectionactivationtime", "", false,
                  OptionsCategory::HIDDEN);
+    // Time logger
+    gArgs.AddArg("-timelog", "Logs local node time for each block", false, OptionsCategory::OPTIONS);
 
     // TODO remove after the Nov 2019 upgrade
     gArgs.AddArg("-gravitonactivationtime", "", false, OptionsCategory::HIDDEN);
@@ -1888,6 +1890,15 @@ bool AppInitMain(Config &config, RPCServer &rpcServer,
                   "loss if bitcoin is started while in a temporary "
                   "directory.\n",
                   gArgs.GetArg("-datadir", ""), fs::current_path().string());
+    }
+
+    if (config.GetTimeLogger()) {
+        BCLog::Logger &timeLogger = GetLogger("timelog");
+        timeLogger.setDefaultFile("block_times.log");
+        if (!timeLogger.OpenDebugLog()) {
+            return InitError(strprintf("Could not open debug log file %s",
+                                       timeLogger.GetDebugLogPath().string()));
+        }
     }
 
     InitSignatureCache();
