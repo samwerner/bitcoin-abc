@@ -1,3 +1,8 @@
+option(BUILD_SOURCE_CONTROL_TOOLS "Build the source control tools" OFF)
+if(BUILD_SOURCE_CONTROL_TOOLS)
+	add_subdirectory(source-control-tools)
+endif()
+
 add_subdirectory(devtools)
 
 include(PackageHelper)
@@ -6,7 +11,6 @@ exclude_from_source_package(
 	"debian/"
 	"gitian/"
 	"gitian-descriptors/"
-	"gitian-signing/"
 	"qos/"
 	"seeds/"
 	"teamcity/"

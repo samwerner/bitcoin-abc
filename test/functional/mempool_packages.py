@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright (c) 2014-2016 The Bitcoin Core developers
+# Copyright (c) 2014-2019 The Bitcoin Core developers
 # Distributed under the MIT software license, see the accompanying
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
 """Test descendant package tracking code."""
@@ -16,19 +16,37 @@ from test_framework.util import (
     sync_mempools,
 )
 
-MAX_ANCESTORS = 25
-MAX_DESCENDANTS = 25
+# TODO: The activation code can be reverted after the new policy becomes
+# active.
+
+# Phonon dummy activation time
+ACTIVATION_TIME = 2000000000
+
+# Replay protection time needs to be moved beyond phonon activation
+REPLAY_PROTECTION_TIME = ACTIVATION_TIME * 2
+
+MAX_ANCESTORS = 50
+MAX_DESCENDANTS = 50
 
 
 class MempoolPackagesTest(BitcoinTestFramework):
     def set_test_params(self):
         self.num_nodes = 2
-        self.extra_args = [["-maxorphantx=1000"],
-                           ["-maxorphantx=1000", "-limitancestorcount=5"]]
+
+        common_params = ["-maxorphantx=1000",
+                         "-phononactivationtime={}".format(ACTIVATION_TIME),
+                         "-replayprotectionactivationtime={}".format(REPLAY_PROTECTION_TIME)]
+
+        self.extra_args = [common_params,
+                           common_params + ["-limitancestorcount=5"]]
+
+    def skip_test_if_missing_module(self):
+        self.skip_if_no_wallet()
 
     # Build a transaction that spends parent_txid:vout
     # Return amount sent
-    def chain_transaction(self, node, parent_txid, vout, value, fee, num_outputs):
+    def chain_transaction(self, node, parent_txid, vout,
+                          value, fee, num_outputs):
         send_value = satoshi_round((value - fee) / num_outputs)
         inputs = [{'txid': parent_txid, 'vout': vout}]
         outputs = {}
@@ -39,11 +57,13 @@ class MempoolPackagesTest(BitcoinTestFramework):
         txid = node.sendrawtransaction(signedtx['hex'])
         fulltx = node.getrawtransaction(txid, 1)
         # make sure we didn't generate a change output
-        assert(len(fulltx['vout']) == num_outputs)
+        assert len(fulltx['vout']) == num_outputs
         return (txid, send_value)
 
     def run_test(self):
-        ''' Mine some blocks and have them mature. '''
+        [n.setmocktime(ACTIVATION_TIME) for n in self.nodes]
+
+        # Mine some blocks and have them mature.
         self.nodes[0].generate(101)
         utxo = self.nodes[0].listunspent(10)
         txid = utxo[0]['txid']
@@ -108,7 +128,8 @@ class MempoolPackagesTest(BitcoinTestFramework):
                 self.nodes[0].getmempooldescendants(x)))
 
             # Check getmempooldescendants verbose output is correct
-            for descendant, dinfo in self.nodes[0].getmempooldescendants(x, True).items():
+            for descendant, dinfo in self.nodes[0].getmempooldescendants(
+                    x, True).items():
                 assert_equal(dinfo['depends'], [
                              chain[chain.index(descendant) - 1]])
                 if dinfo['descendantcount'] > 1:
@@ -124,7 +145,8 @@ class MempoolPackagesTest(BitcoinTestFramework):
                 self.nodes[0].getmempoolancestors(x)))
 
             # Check that getmempoolancestors verbose output is correct
-            for ancestor, ainfo in self.nodes[0].getmempoolancestors(x, True).items():
+            for ancestor, ainfo in self.nodes[0].getmempoolancestors(
+                    x, True).items():
                 assert_equal(ainfo['spentby'], [
                              chain[chain.index(ancestor) + 1]])
                 if ainfo['ancestorcount'] > 1:
@@ -133,22 +155,23 @@ class MempoolPackagesTest(BitcoinTestFramework):
                 else:
                     assert_equal(ainfo['depends'], [])
 
-        # Check that getmempoolancestors/getmempooldescendants correctly handle verbose=true
+        # Check that getmempoolancestors/getmempooldescendants correctly handle
+        # verbose=true
         v_ancestors = self.nodes[0].getmempoolancestors(chain[-1], True)
         assert_equal(len(v_ancestors), len(chain) - 1)
         for x in v_ancestors.keys():
             assert_equal(mempool[x], v_ancestors[x])
-        assert(chain[-1] not in v_ancestors.keys())
+        assert chain[-1] not in v_ancestors.keys()
 
         v_descendants = self.nodes[0].getmempooldescendants(chain[0], True)
         assert_equal(len(v_descendants), len(chain) - 1)
         for x in v_descendants.keys():
             assert_equal(mempool[x], v_descendants[x])
-        assert(chain[0] not in v_descendants.keys())
+        assert chain[0] not in v_descendants.keys()
 
         # Check that ancestor modified fees includes fee deltas from
         # prioritisetransaction
-        self.nodes[0].prioritisetransaction(chain[0], 0, 1000)
+        self.nodes[0].prioritisetransaction(txid=chain[0], fee_delta=1000)
         mempool = self.nodes[0].getrawmempool(True)
         ancestor_fees = 0
         for x in chain:
@@ -159,11 +182,11 @@ class MempoolPackagesTest(BitcoinTestFramework):
                          ancestor_fees * COIN + 1000)
 
         # Undo the prioritisetransaction for later tests
-        self.nodes[0].prioritisetransaction(chain[0], 0, -1000)
+        self.nodes[0].prioritisetransaction(txid=chain[0], fee_delta=-1000)
 
         # Check that descendant modified fees includes fee deltas from
         # prioritisetransaction
-        self.nodes[0].prioritisetransaction(chain[-1], 0, 1000)
+        self.nodes[0].prioritisetransaction(txid=chain[-1], fee_delta=1000)
         mempool = self.nodes[0].getrawmempool(True)
 
         descendant_fees = 0
@@ -185,12 +208,13 @@ class MempoolPackagesTest(BitcoinTestFramework):
         assert_equal(len(self.nodes[0].getrawmempool()), 0)
         # Prioritise a transaction that has been mined, then add it back to the
         # mempool by using invalidateblock.
-        self.nodes[0].prioritisetransaction(chain[-1], 0, 2000)
+        self.nodes[0].prioritisetransaction(txid=chain[-1], fee_delta=2000)
         self.nodes[0].invalidateblock(self.nodes[0].getbestblockhash())
         # Keep node1's tip synced with node0
         self.nodes[1].invalidateblock(self.nodes[1].getbestblockhash())
 
-        # Now check that the transaction is in the mempool, with the right modified fee
+        # Now check that the transaction is in the mempool, with the right
+        # modified fee
         mempool = self.nodes[0].getrawmempool(True)
 
         descendant_fees = 0
@@ -225,7 +249,8 @@ class MempoolPackagesTest(BitcoinTestFramework):
             transaction_package.append(
                 {'txid': txid, 'vout': i, 'amount': sent_value})
 
-        # Sign and send up to MAX_DESCENDANT transactions chained off the parent tx
+        # Sign and send up to MAX_DESCENDANT transactions chained off the
+        # parent tx
         for i in range(MAX_DESCENDANTS - 1):
             utxo = transaction_package.pop(0)
             (txid, sent_value) = self.chain_transaction(

@@ -10,7 +10,7 @@ In this test we connect to one node over p2p, and test tx requests.
 from test_framework.blocktools import (
     create_block,
     create_coinbase,
-    create_transaction,
+    create_tx_with_script,
 )
 from test_framework.txtools import pad_tx
 from test_framework.messages import (
@@ -69,14 +69,15 @@ class InvalidTxRequestTest(BitcoinTestFramework):
         node.p2p.send_blocks_and_test([block], node, success=True)
 
         self.log.info("Mature the block.")
-        self.nodes[0].generate(100)
+        self.nodes[0].generatetoaddress(
+            100, self.nodes[0].get_deterministic_priv_key().address)
 
         # b'\x64' is OP_NOTIF
         # Transaction will be rejected with code 16 (REJECT_INVALID)
         # and we get disconnected immediately
         self.log.info('Test a transaction that is rejected')
-        tx1 = create_transaction(
-            block1.vtx[0], 0, b'\x64' * 35, 50 * COIN - 12000)
+        tx1 = create_tx_with_script(
+            block1.vtx[0], 0, script_sig=b'\x64' * 35, amount=50 * COIN - 12000)
         node.p2p.send_txs_and_test(
             [tx1], node, success=False, expect_disconnect=True)
 
@@ -158,13 +159,15 @@ class InvalidTxRequestTest(BitcoinTestFramework):
         }
         # Transactions that do not end up in the mempool
         # tx_orphan_no_fee, because it has too low fee (p2ps[0] is not disconnected for relaying that tx)
-        # tx_orphan_invaid, because it has negative fee (p2ps[1] is disconnected for relaying that tx)
+        # tx_orphan_invaid, because it has negative fee (p2ps[1] is
+        # disconnected for relaying that tx)
 
         # p2ps[1] is no longer connected
         wait_until(lambda: 1 == len(node.getpeerinfo()), timeout=12)
         assert_equal(expected_mempool, set(node.getrawmempool()))
 
-        # restart node with sending BIP61 messages disabled, check that it disconnects without sending the reject message
+        # restart node with sending BIP61 messages disabled, check that it
+        # disconnects without sending the reject message
         self.log.info(
             'Test a transaction that is rejected, with BIP61 disabled')
         self.restart_node(0, ['-enablebip61=0', '-persistmempool=0'])

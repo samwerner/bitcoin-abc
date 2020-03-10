@@ -9,7 +9,7 @@
 #include <QTextStream>
 
 CSVModelWriter::CSVModelWriter(const QString &_filename, QObject *parent)
-    : QObject(parent), filename(_filename), model(0) {}
+    : QObject(parent), filename(_filename), model(nullptr) {}
 
 void CSVModelWriter::setModel(const QAbstractItemModel *_model) {
     this->model = _model;
@@ -40,7 +40,9 @@ static void writeNewline(QTextStream &f) {
 
 bool CSVModelWriter::write() {
     QFile file(filename);
-    if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) return false;
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        return false;
+    }
     QTextStream out(&file);
 
     int numRows = 0;

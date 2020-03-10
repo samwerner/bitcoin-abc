@@ -1,4 +1,4 @@
-// Copyright (c) 2011-2016 The Bitcoin Core developers
+// Copyright (c) 2011-2019 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -30,6 +30,7 @@ class PlatformStyle;
 class RPCConsole;
 class SendCoinsRecipient;
 class UnitDisplayStatusBarControl;
+class WalletController;
 class WalletFrame;
 class WalletModel;
 class HelpMessageDialog;
@@ -51,7 +52,8 @@ QT_END_NAMESPACE
 
 namespace GUIUtil {
 class ClickableLabel;
-}
+class ClickableProgressBar;
+} // namespace GUIUtil
 
 /**
  * Bitcoin GUI main class. This class represents the main window of the Bitcoin
@@ -66,7 +68,8 @@ public:
 
     explicit BitcoinGUI(interfaces::Node &node, const Config *,
                         const PlatformStyle *platformStyle,
-                        const NetworkStyle *networkStyle, QWidget *parent = 0);
+                        const NetworkStyle *networkStyle,
+                        QWidget *parent = nullptr);
     ~BitcoinGUI();
 
     /**
@@ -75,6 +78,9 @@ public:
      * the P2P network, and is wallet-agnostic.
      */
     void setClientModel(ClientModel *clientModel);
+#ifdef ENABLE_WALLET
+    void setWalletController(WalletController *wallet_controller);
+#endif
 
 #ifdef ENABLE_WALLET
     /**
@@ -82,8 +88,8 @@ public:
      * The wallet model represents a bitcoin wallet, and offers access to the
      * list of transactions, address book and sending functionality.
      */
-    bool addWallet(WalletModel *walletModel);
-    bool removeWallet(WalletModel *walletModel);
+    void addWallet(WalletModel *walletModel);
+    void removeWallet(WalletModel *walletModel);
     void removeAllWallets();
 #endif // ENABLE_WALLET
     bool enableWallet = false;
@@ -98,6 +104,7 @@ protected:
 
 private:
     interfaces::Node &m_node;
+    WalletController *m_wallet_controller{nullptr};
     std::unique_ptr<interfaces::Handler> m_handler_message_box;
     std::unique_ptr<interfaces::Handler> m_handler_question;
     ClientModel *clientModel = nullptr;
@@ -108,9 +115,9 @@ private:
     QLabel *labelWalletHDStatusIcon = nullptr;
     GUIUtil::ClickableLabel *labelProxyIcon = nullptr;
     GUIUtil::ClickableLabel *connectionsControl = nullptr;
-    QLabel *labelBlocksIcon = nullptr;
+    GUIUtil::ClickableLabel *labelBlocksIcon = nullptr;
     QLabel *progressBarLabel = nullptr;
-    QProgressBar *progressBar = nullptr;
+    GUIUtil::ClickableProgressBar *progressBar = nullptr;
     QProgressDialog *progressDialog = nullptr;
 
     QMenuBar *appMenuBar = nullptr;
@@ -153,8 +160,9 @@ private:
     int prevBlocks = 0;
     int spinnerFrame = 0;
 
-    const PlatformStyle *platformStyle;
     const Config *config;
+    const PlatformStyle *platformStyle;
+    const NetworkStyle *const m_network_style;
 
     /** Create the main UI actions. */
     void createActions();
@@ -163,7 +171,7 @@ private:
     /** Create the toolbars */
     void createToolBars();
     /** Create system tray icon and notification */
-    void createTrayIcon(const NetworkStyle *networkStyle);
+    void createTrayIcon();
     /** Create system tray menu (or setup the dock menu) */
     void createTrayIconMenu();
 
@@ -186,6 +194,8 @@ private:
 Q_SIGNALS:
     /** Signal raised when a URI was entered or dragged to the GUI */
     void receivedURI(const QString &uri);
+    /** Signal raised when RPC console shown */
+    void consoleShown(RPCConsole *console);
 
 public Q_SLOTS:
     /** Set number of connections shown in the UI */
@@ -210,8 +220,8 @@ public Q_SLOTS:
                  unsigned int style, bool *ret = nullptr);
 
 #ifdef ENABLE_WALLET
-    bool setCurrentWallet(const QString &name);
-    bool setCurrentWalletBySelectorIndex(int index);
+    void setCurrentWallet(WalletModel *wallet_model);
+    void setCurrentWalletBySelectorIndex(int index);
     /** Set the UI status indicators based on the currently selected wallet.
      */
     void updateWalletStatus();
@@ -241,8 +251,9 @@ public Q_SLOTS:
 private:
     /** Set the proxy-enabled icon as shown in the UI. */
     void updateProxyIcon();
+    void updateWindowTitle();
 
-private Q_SLOTS:
+public Q_SLOTS:
 #ifdef ENABLE_WALLET
     /** Switch to overview (home) page */
     void gotoOverviewPage();
@@ -274,15 +285,19 @@ private Q_SLOTS:
 #ifndef Q_OS_MAC
     /** Handle tray icon clicked */
     void trayIconActivated(QSystemTrayIcon::ActivationReason reason);
+#else
+    /** Handle macOS Dock icon clicked */
+    void macosDockIconActivated();
 #endif
 
     /** Show window if hidden, unminimize when minimized, rise when obscured or
      * show if hidden and fToggleHidden is true */
-    void showNormalIfMinimized(bool fToggleHidden = false);
+    void showNormalIfMinimized() { showNormalIfMinimized(false); }
+    void showNormalIfMinimized(bool fToggleHidden);
     /** Simply calls showNormalIfMinimized(true) for use in SLOT() macro */
     void toggleHidden();
 
-    /** called by a timer to check if fRequestShutdown has been set **/
+    /** called by a timer to check if ShutdownRequested() has been set **/
     void detectShutdown();
 
     /** Show progress dialog e.g. for verifychain */

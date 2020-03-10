@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright (c) 2017 The Bitcoin Core developers
+# Copyright (c) 2017-2019 The Bitcoin Core developers
 # Distributed under the MIT software license, see the accompanying
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
 """Test recovery from a crash during chainstate writing.
@@ -28,10 +28,10 @@
 import errno
 import http.client
 import random
-import sys
 import time
 
 from test_framework.blocktools import create_confirmed_utxos
+from test_framework.cdefs import DEFAULT_MAX_BLOCK_SIZE
 from test_framework.messages import (
     COIN,
     COutPoint,
@@ -41,19 +41,17 @@ from test_framework.messages import (
     ToHex,
 )
 from test_framework.test_framework import BitcoinTestFramework
-from test_framework.util import assert_equal, hex_str_to_bytes
-
-HTTP_DISCONNECT_ERRORS = [http.client.CannotSendRequest]
-try:
-    HTTP_DISCONNECT_ERRORS.append(http.client.RemoteDisconnected)
-except AttributeError:
-    pass
+from test_framework.util import (
+    assert_equal,
+    hex_str_to_bytes,
+)
 
 
 class ChainstateWriteCrashTest(BitcoinTestFramework):
     def set_test_params(self):
         self.num_nodes = 4
         self.setup_clean_chain = False
+        self.rpc_timeout = 480
 
         # Set -maxmempool=0 to turn off mempool memory sharing with dbcache
         # Set -rpcservertimeout=900 to reduce socket disconnects in this
@@ -69,13 +67,17 @@ class ChainstateWriteCrashTest(BitcoinTestFramework):
         self.node2_args = ["-dbcrashratio=24", "-dbcache=16"] + self.base_args
 
         # Node3 is a normal node with default args, except will mine full blocks
-        self.node3_args = ["-blockmaxsize=32000000"]
+        # and non-standard txs (e.g. txs with "dust" outputs)
+        self.node3_args = [
+            "-blockmaxsize={}".format(DEFAULT_MAX_BLOCK_SIZE), "-acceptnonstdtxn"]
         self.extra_args = [self.node0_args, self.node1_args,
                            self.node2_args, self.node3_args]
 
+    def skip_test_if_missing_module(self):
+        self.skip_if_no_wallet()
+
     def setup_network(self):
-        # Need a bit of extra time for the nodes to start up for this test
-        self.add_nodes(self.num_nodes, extra_args=self.extra_args, timewait=90)
+        self.add_nodes(self.num_nodes, extra_args=self.extra_args)
         self.start_nodes()
         # Leave them unconnected, we'll use submitblock directly in this test
 
@@ -94,7 +96,7 @@ class ChainstateWriteCrashTest(BitcoinTestFramework):
                 utxo_hash = self.nodes[node_index].gettxoutsetinfo()[
                     'hash_serialized']
                 return utxo_hash
-            except:
+            except Exception:
                 # An exception here should mean the node is about to crash.
                 # If bitcoind exits, then try again.  wait_for_node_exit()
                 # should raise an exception if bitcoind doesn't exit.
@@ -119,15 +121,7 @@ class ChainstateWriteCrashTest(BitcoinTestFramework):
         try:
             self.nodes[node_index].submitblock(block)
             return True
-        except http.client.BadStatusLine as e:
-            # Prior to 3.5 BadStatusLine('') was raised for a remote disconnect error.
-            if sys.version_info[0] == 3 and sys.version_info[1] < 5 and e.line == "''":
-                self.log.debug(
-                    "node {} submitblock raised exception: {}".format(node_index, e))
-                return False
-            else:
-                raise
-        except tuple(HTTP_DISCONNECT_ERRORS) as e:
+        except (http.client.CannotSendRequest, http.client.RemoteDisconnected) as e:
             self.log.debug(
                 "node {} submitblock raised exception: {}".format(node_index, e))
             return False
@@ -168,7 +162,7 @@ class ChainstateWriteCrashTest(BitcoinTestFramework):
                     # (change the exit code perhaps, and check that here?)
                     self.wait_for_node_exit(i, timeout=30)
                     self.log.debug(
-                        "Restarting node %d after block hash {}".format(i, block_hash))
+                        "Restarting node {} after block hash {}".format(i, block_hash))
                     nodei_utxo_hash = self.restart_node(i, block_hash)
                     assert nodei_utxo_hash is not None
                     self.restart_counts[i] += 1
@@ -245,19 +239,22 @@ class ChainstateWriteCrashTest(BitcoinTestFramework):
 
         # Sync these blocks with the other nodes
         block_hashes_to_sync = []
-        for height in range(initial_height + 1, self.nodes[3].getblockcount() + 1):
+        for height in range(initial_height + 1,
+                            self.nodes[3].getblockcount() + 1):
             block_hashes_to_sync.append(self.nodes[3].getblockhash(height))
 
         self.log.debug("Syncing {} blocks with other nodes".format(
             len(block_hashes_to_sync)))
-        # Syncing the blocks could cause nodes to crash, so the test begins here.
+        # Syncing the blocks could cause nodes to crash, so the test begins
+        # here.
         self.sync_node3blocks(block_hashes_to_sync)
 
         starting_tip_height = self.nodes[3].getblockcount()
 
         # Main test loop:
         # each time through the loop, generate a bunch of transactions,
-        # and then either mine a single new block on the tip, or some-sized reorg.
+        # and then either mine a single new block on the tip, or some-sized
+        # reorg.
         for i in range(40):
             self.log.info(
                 "Iteration {}, generating 2500 transactions {}".format(
@@ -308,7 +305,7 @@ class ChainstateWriteCrashTest(BitcoinTestFramework):
         # Warn if any of the nodes escaped restart.
         for i in range(3):
             if self.restart_counts[i] == 0:
-                self.log.warn(
+                self.log.warning(
                     "Node {} never crashed during utxo flush!".format(i))
 
 

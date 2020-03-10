@@ -1,4 +1,4 @@
-// Copyright (c) 2018 The Bitcoin developers
+// Copyright (c) 2018-2020 The Bitcoin developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -18,8 +18,7 @@ typedef std::vector<valtype> stacktype;
 
 BOOST_FIXTURE_TEST_SUITE(checkdatasig_tests, BasicTestingSetup)
 
-std::array<uint32_t, 3> flagset{
-    {0, STANDARD_SCRIPT_VERIFY_FLAGS, MANDATORY_SCRIPT_VERIFY_FLAGS}};
+std::array<uint32_t, 3> flagset{{0, STANDARD_SCRIPT_VERIFY_FLAGS}};
 
 const uint8_t vchPrivkey[32] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
                                 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1};
@@ -150,7 +149,7 @@ BOOST_AUTO_TEST_CASE(checkdatasig_test) {
 
     MMIXLinearCongruentialGenerator lcg;
     for (int i = 0; i < 4096; i++) {
-        uint32_t flags = lcg.next() | SCRIPT_VERIFY_CHECKDATASIG_SIGOPS;
+        uint32_t flags = lcg.next();
 
         if (flags & SCRIPT_VERIFY_STRICTENC) {
             // When strict encoding is enforced, hybrid keys are invalid.
@@ -158,12 +157,6 @@ BOOST_AUTO_TEST_CASE(checkdatasig_test) {
                        ScriptError::PUBKEYTYPE);
             CheckError(flags, {{}, message, pubkeyH}, scriptverify,
                        ScriptError::PUBKEYTYPE);
-        } else if (flags & SCRIPT_VERIFY_COMPRESSED_PUBKEYTYPE) {
-            // When compressed-only is enforced, hybrid keys are invalid.
-            CheckError(flags, {{}, message, pubkeyH}, script,
-                       ScriptError::NONCOMPRESSED_PUBKEY);
-            CheckError(flags, {{}, message, pubkeyH}, scriptverify,
-                       ScriptError::NONCOMPRESSED_PUBKEY);
         } else {
             // Otherwise, hybrid keys are valid.
             CheckPass(flags, {{}, message, pubkeyH}, script, {});
@@ -171,18 +164,10 @@ BOOST_AUTO_TEST_CASE(checkdatasig_test) {
                        ScriptError::CHECKDATASIGVERIFY);
         }
 
-        if (flags & SCRIPT_VERIFY_COMPRESSED_PUBKEYTYPE) {
-            // When compressed-only is enforced, uncompressed keys are invalid.
-            CheckError(flags, {{}, message, pubkey}, script,
-                       ScriptError::NONCOMPRESSED_PUBKEY);
-            CheckError(flags, {{}, message, pubkey}, scriptverify,
-                       ScriptError::NONCOMPRESSED_PUBKEY);
-        } else {
-            // Otherwise, uncompressed keys are valid.
-            CheckPass(flags, {{}, message, pubkey}, script, {});
-            CheckError(flags, {{}, message, pubkey}, scriptverify,
-                       ScriptError::CHECKDATASIGVERIFY);
-        }
+        // Uncompressed keys are valid.
+        CheckPass(flags, {{}, message, pubkey}, script, {});
+        CheckError(flags, {{}, message, pubkey}, scriptverify,
+                   ScriptError::CHECKDATASIGVERIFY);
 
         if (flags & SCRIPT_VERIFY_NULLFAIL) {
             // Invalid signature causes checkdatasig to fail.
@@ -250,11 +235,9 @@ BOOST_AUTO_TEST_CASE(checkdatasig_test) {
     }
 }
 
-BOOST_AUTO_TEST_CASE(checkdatasig_inclusion_in_standard_and_mandatory_flags) {
+BOOST_AUTO_TEST_CASE(checkdatasig_sigops_inclusion_in_standard_flags) {
     BOOST_CHECK(STANDARD_SCRIPT_VERIFY_FLAGS &
                 SCRIPT_VERIFY_CHECKDATASIG_SIGOPS);
-    BOOST_CHECK(
-        !(MANDATORY_SCRIPT_VERIFY_FLAGS & SCRIPT_VERIFY_CHECKDATASIG_SIGOPS));
 }
 
 BOOST_AUTO_TEST_SUITE_END()

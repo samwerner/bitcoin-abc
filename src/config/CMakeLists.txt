@@ -111,11 +111,13 @@ check_symbol_exists(malloc_info "malloc.h" HAVE_MALLOC_INFO)
 
 # Various system libraries
 check_symbol_exists(strnlen "string.h" HAVE_DECL_STRNLEN)
-check_symbol_exists(daemon "unistd.h" HAVE_DECL_DAEMON)
+# daemon() is located in unistd.h on linux and in stdlib.h on BSDs and macOS.
+check_symbol_exists(daemon "unistd.h;stdlib.h" HAVE_DECL_DAEMON)
 
 # Check for ways to obtain entropy
 check_symbol_exists(getentropy "unistd.h" HAVE_GETENTROPY)
-check_symbol_exists(getentropy "sys/random.h" HAVE_GETENTROPY_RAND)
+# macOS needs unistd.h and sys/random.h to define getentropy
+check_symbol_exists(getentropy "unistd.h;sys/random.h" HAVE_GETENTROPY_RAND)
 
 # getifaddrs and freeifaddrs may be unavailable with some Android versions
 check_symbol_exists(getifaddrs "sys/types.h;ifaddrs.h" HAVE_DECL_GETIFADDRS)
@@ -124,6 +126,7 @@ check_symbol_exists(freeifaddrs "sys/types.h;ifaddrs.h" HAVE_DECL_FREEIFADDRS)
 check_cxx_source_compiles("
 	#include <unistd.h>  /* for syscall */
 	#include <sys/syscall.h>  /* for SYS_getrandom */
+	#include <linux/random.h>
 	int main() {
 		syscall(SYS_getrandom, nullptr, 0, 0);
 		return 0;
@@ -170,8 +173,31 @@ check_cxx_source_compiles("
     }
 " HAVE_FUNC_ATTRIBUTE_DLLEXPORT)
 
+#__fdelt_chk's params and return type have changed from long unsigned int to
+# long int. See which one is present here.
+include(CheckPrototypeDefinition)
+
+set(CMAKE_REQUIRED_DEFINITIONS -D_FORTIFY_SOURCE=2)
+# Without some optimization the compiler won't detect the prototype conflict
+# and always succeed to build.
+set(CMAKE_REQUIRED_FLAGS -O2)
+
+check_prototype_definition(
+	__fdelt_warn
+	"extern long unsigned int __fdelt_warn(long unsigned int a)"
+	"0"
+	"sys/select.h"
+	FDELT_PROTOTYPE_LONG_UNSIGNED_INT
+)
+
+if(FDELT_PROTOTYPE_LONG_UNSIGNED_INT)
+	set(FDELT_TYPE "long unsigned int")
+else()
+	set(FDELT_TYPE "long int")
+endif()
+
 # OpenSSL functionality
-set(CMAKE_REQUIRED_INCLUDES ${OPENSSL_CRYPTO_INCLUDES})
+set(CMAKE_REQUIRED_INCLUDES ${OPENSSL_INCLUDE_DIR})
 set(CMAKE_REQUIRED_LIBRARIES ${OPENSSL_CRYPTO_LIBRARY})
 check_symbol_exists(EVP_MD_CTX_new "openssl/evp.h" HAVE_DECL_EVP_MD_CTX_NEW)
 
@@ -197,6 +223,10 @@ if(ENABLE_UPNP)
 	#  - If UPnP should be the default port map method, USE_UPNP should be
 	#    defined to 1, otherwise it should be defined to 0.
 	set(USE_UPNP ${START_WITH_UPNP} CACHE INTERNAL "UPnP is enabled")
+endif()
+
+if(ENABLE_NOTIFICATIONS)
+	set(USE_DBUS 1)
 endif()
 
 # Generate the config

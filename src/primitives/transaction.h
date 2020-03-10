@@ -1,6 +1,6 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
 // Copyright (c) 2009-2016 The Bitcoin Core developers
-// Copyright (c) 2017-2018 The Bitcoin developers
+// Copyright (c) 2017-2019 The Bitcoin developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -264,14 +264,6 @@ public:
     // GetValueIn() is a method on CCoinsViewCache, because
     // inputs must be known to compute value in.
 
-    // Compute priority, given priority of inputs and (optionally) tx size
-    double ComputePriority(double dPriorityInputs,
-                           unsigned int nTxSize = 0) const;
-
-    // Compute modified tx size for priority calculation (optionally given tx
-    // size)
-    unsigned int CalculateModifiedSize(unsigned int nTxSize = 0) const;
-
     /**
      * Get the total transaction size in bytes.
      * @return Total transaction size in bytes
@@ -283,11 +275,11 @@ public:
     }
 
     friend bool operator==(const CTransaction &a, const CTransaction &b) {
-        return a.hash == b.hash;
+        return a.GetHash() == b.GetHash();
     }
 
     friend bool operator!=(const CTransaction &a, const CTransaction &b) {
-        return a.hash != b.hash;
+        return !(a == b);
     }
 
     std::string ToString() const;
@@ -333,7 +325,7 @@ public:
 
     friend bool operator==(const CMutableTransaction &a,
                            const CMutableTransaction &b) {
-        return a.GetId() == b.GetId();
+        return a.GetHash() == b.GetHash();
     }
 };
 #if defined(__x86_64__)

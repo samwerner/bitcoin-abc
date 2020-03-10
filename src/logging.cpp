@@ -1,6 +1,6 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
 // Copyright (c) 2009-2016 The Bitcoin Core developers
-// Copyright (c) 2017-2018 The Bitcoin developers
+// Copyright (c) 2017-2019 The Bitcoin developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -8,27 +8,27 @@
 
 #include <logging.h>
 
-#include <util/system.h>
 #include <util/time.h>
 
 bool fLogIPs = DEFAULT_LOGIPS;
 const char *const DEFAULT_DEBUGLOGFILE = "debug.log";
 
-/**
- * NOTE: the logger instance is leaked on exit. This is ugly, but will be
- * cleaned up by the OS/libc. Defining a logger as a global object doesn't work
- * since the order of destruction of static/global objects is undefined.
- * Consider if the logger gets destroyed, and then some later destructor calls
- * LogPrintf, maybe indirectly, and you get a core dump at shutdown trying to
- * access the logger. When the shutdown sequence is fully audited and tested,
- * explicit destruction of these objects can be implemented by changing this
- * from a raw pointer to a std::unique_ptr.
- *
- * This method of initialization was originally introduced in
- * ee3374234c60aba2cc4c5cd5cac1c0aefc2d817c.
- */
-BCLog::Logger &GetLogger(const std::string& loggerName) {
-    // static BCLog::Logger *const logger = new BCLog::Logger();
+BCLog::Logger &LogInstance(const std::string& loggerName) {
+    /**
+     * NOTE: the logger instance is leaked on exit. This is ugly, but will be
+     * cleaned up by the OS/libc. Defining a logger as a global object doesn't
+     * work since the order of destruction of static/global objects is
+     * undefined. Consider if the logger gets destroyed, and then some later
+     * destructor calls LogPrintf, maybe indirectly, and you get a core dump at
+     * shutdown trying to access the logger. When the shutdown sequence is fully
+     * audited and tested, explicit destruction of these objects can be
+     * implemented by changing this from a raw pointer to a std::unique_ptr.
+     * Since the destructor is never called, the logger and all its members must
+     * have a trivial destructor.
+     *
+     * This method of initialization was originally introduced in
+     * ee3374234c60aba2cc4c5cd5cac1c0aefc2d817c.
+     */
     static std::unordered_map<std::string, BCLog::Logger *const> loggers = {
             {"debug", new BCLog::Logger()},
             {"timelog", new BCLog::Logger()}
@@ -40,18 +40,13 @@ static int FileWriteStr(const std::string &str, FILE *fp) {
     return fwrite(str.data(), 1, str.size(), fp);
 }
 
-fs::path BCLog::Logger::GetDebugLogPath() {
-    fs::path logfile(gArgs.GetArg("-debuglogfile", defaultFile));
-    return AbsPathForConfigVal(logfile);
-}
-
 bool BCLog::Logger::OpenDebugLog() {
     std::lock_guard<std::mutex> scoped_lock(m_file_mutex);
 
     assert(m_fileout == nullptr);
-    fs::path pathDebug = GetDebugLogPath();
+    assert(!m_file_path.empty());
 
-    m_fileout = fsbridge::fopen(pathDebug, "a");
+    m_fileout = fsbridge::fopen(m_file_path, "a");
     if (!m_fileout) {
         return false;
     }
@@ -192,7 +187,8 @@ void BCLog::Logger::LogPrintStr(const std::string &str) {
         // Print to console.
         fwrite(strTimestamped.data(), 1, strTimestamped.size(), stdout);
         fflush(stdout);
-    } else if (m_print_to_file) {
+    }
+    if (m_print_to_file) {
         std::lock_guard<std::mutex> scoped_lock(m_file_mutex);
 
         // Buffer if we haven't opened the log yet.
@@ -202,8 +198,7 @@ void BCLog::Logger::LogPrintStr(const std::string &str) {
             // Reopen the log file, if requested.
             if (m_reopen_file) {
                 m_reopen_file = false;
-                fs::path pathDebug = GetDebugLogPath();
-                FILE *new_fileout = fsbridge::fopen(pathDebug, "a");
+                FILE *new_fileout = fsbridge::fopen(m_file_path, "a");
                 if (new_fileout) {
                     // unbuffered.
                     setbuf(m_fileout, nullptr);
@@ -219,13 +214,22 @@ void BCLog::Logger::LogPrintStr(const std::string &str) {
 void BCLog::Logger::ShrinkDebugFile() {
     // Amount of debug.log to save at end when shrinking (must fit in memory)
     constexpr size_t RECENT_DEBUG_HISTORY_SIZE = 10 * 1000000;
+
+    assert(!m_file_path.empty());
+
     // Scroll debug.log if it's getting too big.
-    fs::path pathLog = GetDebugLogPath();
-    FILE *file = fsbridge::fopen(pathLog, "r");
+    FILE *file = fsbridge::fopen(m_file_path, "r");
+
+    // Special files (e.g. device nodes) may not have a size.
+    size_t log_size = 0;
+    try {
+        log_size = fs::file_size(m_file_path);
+    } catch (const fs::filesystem_error &) {
+    }
+
     // If debug.log file is more than 10% bigger the RECENT_DEBUG_HISTORY_SIZE
     // trim it down by saving only the last RECENT_DEBUG_HISTORY_SIZE bytes.
-    if (file &&
-        fs::file_size(pathLog) > 11 * (RECENT_DEBUG_HISTORY_SIZE / 10)) {
+    if (file && log_size > 11 * (RECENT_DEBUG_HISTORY_SIZE / 10)) {
         // Restart the file with some of the end.
         std::vector<char> vch(RECENT_DEBUG_HISTORY_SIZE, 0);
         if (fseek(file, -((long)vch.size()), SEEK_END)) {
@@ -236,7 +240,7 @@ void BCLog::Logger::ShrinkDebugFile() {
         int nBytes = fread(vch.data(), 1, vch.size(), file);
         fclose(file);
 
-        file = fsbridge::fopen(pathLog, "w");
+        file = fsbridge::fopen(m_file_path, "w");
         if (file) {
             fwrite(vch.data(), 1, nBytes, file);
             fclose(file);

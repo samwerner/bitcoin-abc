@@ -6,7 +6,6 @@
 
 #include <crypto/sha256.h>
 #include <key.h>
-#include <random.h>
 #include <util/strencodings.h>
 #include <util/system.h>
 #include <validation.h>
@@ -25,50 +24,57 @@ static const int64_t DEFAULT_PLOT_WIDTH = 1024;
 static const int64_t DEFAULT_PLOT_HEIGHT = 768;
 
 static void SetupBenchArgs() {
-    gArgs.AddArg("-?", _("Print this help message and exit"), false,
+    gArgs.AddArg("-?", "Print this help message and exit", false,
                  OptionsCategory::OPTIONS);
     gArgs.AddArg("-list",
-                 _("List benchmarks without executing them. Can be combined "
-                   "with -scaling and -filter"),
+                 "List benchmarks without executing them. Can be combined "
+                 "with -scaling and -filter",
                  false, OptionsCategory::OPTIONS);
     gArgs.AddArg(
         "-evals=<n>",
-        strprintf(
-            _("Number of measurement evaluations to perform. (default: %u)"),
-            DEFAULT_BENCH_EVALUATIONS),
+        strprintf("Number of measurement evaluations to perform. (default: %u)",
+                  DEFAULT_BENCH_EVALUATIONS),
         false, OptionsCategory::OPTIONS);
     gArgs.AddArg("-filter=<regex>",
-                 strprintf(_("Regular expression filter to select benchmark by "
-                             "name (default: %s)"),
+                 strprintf("Regular expression filter to select benchmark by "
+                           "name (default: %s)",
                            DEFAULT_BENCH_FILTER),
                  false, OptionsCategory::OPTIONS);
     gArgs.AddArg(
         "-scaling=<n>",
-        strprintf(_("Scaling factor for benchmark's runtime (default: %u)"),
+        strprintf("Scaling factor for benchmark's runtime (default: %u)",
                   DEFAULT_BENCH_SCALING),
         false, OptionsCategory::OPTIONS);
     gArgs.AddArg(
         "-printer=(console|plot)",
-        strprintf(_("Choose printer format. console: print data to console. "
-                    "plot: Print results as HTML graph (default: %s)"),
+        strprintf("Choose printer format. console: print data to console. "
+                  "plot: Print results as HTML graph (default: %s)",
                   DEFAULT_BENCH_PRINTER),
         false, OptionsCategory::OPTIONS);
     gArgs.AddArg("-plot-plotlyurl=<uri>",
-                 strprintf(_("URL to use for plotly.js (default: %s)"),
+                 strprintf("URL to use for plotly.js (default: %s)",
                            DEFAULT_PLOT_PLOTLYURL),
                  false, OptionsCategory::OPTIONS);
     gArgs.AddArg(
         "-plot-width=<x>",
-        strprintf(_("Plot width in pixel (default: %u)"), DEFAULT_PLOT_WIDTH),
+        strprintf("Plot width in pixel (default: %u)", DEFAULT_PLOT_WIDTH),
         false, OptionsCategory::OPTIONS);
     gArgs.AddArg(
         "-plot-height=<x>",
-        strprintf(_("Plot height in pixel (default: %u)"), DEFAULT_PLOT_HEIGHT),
+        strprintf("Plot height in pixel (default: %u)", DEFAULT_PLOT_HEIGHT),
         false, OptionsCategory::OPTIONS);
 
     // Hidden
     gArgs.AddArg("-h", "", false, OptionsCategory::HIDDEN);
     gArgs.AddArg("-help", "", false, OptionsCategory::HIDDEN);
+}
+
+static fs::path SetDataDir() {
+    fs::path ret =
+        fs::temp_directory_path() / "bench_bitcoin" / fs::unique_path();
+    fs::create_directories(ret);
+    gArgs.ForceSetArg("-datadir", ret.string());
+    return ret;
 }
 
 int main(int argc, char **argv) {
@@ -85,13 +91,12 @@ int main(int argc, char **argv) {
         return EXIT_SUCCESS;
     }
 
+    // Set the datadir after parsing the bench options
+    const fs::path bench_datadir{SetDataDir()};
+
     SHA256AutoDetect();
-    RandomInit();
     ECC_Start();
     SetupEnvironment();
-
-    // don't want to write to debug.log file
-    GetLogger().m_print_to_file = false;
 
     int64_t evaluations = gArgs.GetArg("-evals", DEFAULT_BENCH_EVALUATIONS);
     std::string regex_filter = gArgs.GetArg("-filter", DEFAULT_BENCH_FILTER);
@@ -105,8 +110,8 @@ int main(int argc, char **argv) {
         return EXIT_FAILURE;
     }
 
-    std::unique_ptr<benchmark::Printer> printer(
-        new benchmark::ConsolePrinter());
+    std::unique_ptr<benchmark::Printer> printer =
+        std::make_unique<benchmark::ConsolePrinter>();
     std::string printer_arg = gArgs.GetArg("-printer", DEFAULT_BENCH_PRINTER);
     if ("plot" == printer_arg) {
         printer.reset(new benchmark::PlotlyPrinter(
@@ -117,6 +122,8 @@ int main(int argc, char **argv) {
 
     benchmark::BenchRunner::RunAll(*printer, evaluations, scaling_factor,
                                    regex_filter, is_list_only);
+
+    fs::remove_all(bench_datadir);
 
     ECC_Stop();
 

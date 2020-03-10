@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright (c) 2015-2016 The Bitcoin Core developers
+# Copyright (c) 2015-2019 The Bitcoin Core developers
 # Copyright (c) 2019 The Bitcoin developers
 # Distributed under the MIT software license, see the accompanying
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
@@ -30,6 +30,24 @@ SET_FALSE_POSITIVE_UNKNOWNS = set(['-zmqpubhashblock',
                                    '-zmqpubrawblock',
                                    '-zmqpubrawtx'])
 
+# list false positive undocumented arguments
+SET_FALSE_POSITIVE_UNDOCUMENTED = set(['-benchmark',
+                                       '-blockminsize',
+                                       '-dbcrashratio',
+                                       '-debugnet',
+                                       '-enableminerfund',
+                                       '-forcecompactdb',
+                                       '-parkdeepreorg',
+                                       '-automaticunparking',
+                                       # Remove after May 2020 upgrade
+                                       '-phononactivationtime',
+                                       '-replayprotectionactivationtime',
+                                       '-rpcssl',
+                                       '-socks',
+                                       '-tor',
+                                       '-usehd',
+                                       '-whitelistalwaysrelay'])
+
 
 def main():
     top_level = check_output(TOP_LEVEL, shell=True,
@@ -54,6 +72,7 @@ def main():
             args_docd |= set(re.findall(re.compile(REGEX_DOC), content))
 
     args_used |= SET_FALSE_POSITIVE_UNKNOWNS
+    args_docd |= SET_FALSE_POSITIVE_UNDOCUMENTED
     args_need_doc = args_used - args_docd
     args_unknown = args_docd - args_used
 

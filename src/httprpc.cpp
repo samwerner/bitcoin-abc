@@ -16,10 +16,12 @@
 #include <ui_interface.h>
 #include <util/strencodings.h>
 #include <util/system.h>
+#include <walletinitinterface.h>
 
 #include <boost/algorithm/string.hpp> // boost::trim
 
 #include <cstdio>
+#include <memory>
 
 /** WWW-Authenticate to present with 401 Unauthorized response */
 static const char *WWW_AUTH_HEADER_DATA = "Basic realm=\"jsonrpc\"";
@@ -70,10 +72,11 @@ static void JSONErrorReply(HTTPRequest *req, const UniValue &objError,
     int nStatus = HTTP_INTERNAL_SERVER_ERROR;
     int code = find_value(objError, "code").get_int();
 
-    if (code == RPC_INVALID_REQUEST)
+    if (code == RPC_INVALID_REQUEST) {
         nStatus = HTTP_BAD_REQUEST;
-    else if (code == RPC_METHOD_NOT_FOUND)
+    } else if (code == RPC_METHOD_NOT_FOUND) {
         nStatus = HTTP_NOT_FOUND;
+    }
 
     std::string strReply = JSONRPCReply(NullUniValue, objError, id);
 
@@ -314,8 +317,9 @@ bool HTTPRPCRequestProcessor::ProcessHTTPRequest(HTTPRequest *req) {
     try {
         // Parse request
         UniValue valRequest;
-        if (!valRequest.read(req->ReadBody()))
+        if (!valRequest.read(req->ReadBody())) {
             throw JSONRPCError(RPC_PARSE_ERROR, "Parse error");
+        }
 
         // Set the URI
         jreq.URI = req->GetURI();
@@ -387,14 +391,12 @@ bool StartHTTPRPC(Config &config,
             std::bind(&HTTPRPCRequestProcessor::DelegateHTTPRequest,
                       &httpRPCRequestProcessor, std::placeholders::_2);
     RegisterHTTPHandler("/", true, rpcFunction);
-#ifdef ENABLE_WALLET
-    // ifdef can be removed once we switch to better endpoint support and API
-    // versioning
-    RegisterHTTPHandler("/wallet/", false, rpcFunction);
-#endif
-    assert(EventBase());
-    httpRPCTimerInterface =
-        std::make_unique<HTTPRPCTimerInterface>(EventBase());
+    if (g_wallet_init_interface.HasWalletSupport()) {
+        RegisterHTTPHandler("/wallet/", false, rpcFunction);
+    }
+    struct event_base *eventBase = EventBase();
+    assert(eventBase);
+    httpRPCTimerInterface = std::make_unique<HTTPRPCTimerInterface>(eventBase);
     RPCSetTimerInterface(httpRPCTimerInterface.get());
     return true;
 }
@@ -406,9 +408,9 @@ void InterruptHTTPRPC() {
 void StopHTTPRPC() {
     LogPrint(BCLog::RPC, "Stopping HTTP RPC server\n");
     UnregisterHTTPHandler("/", true);
-#ifdef ENABLE_WALLET
-    UnregisterHTTPHandler("/wallet/", false);
-#endif
+    if (g_wallet_init_interface.HasWalletSupport()) {
+        UnregisterHTTPHandler("/wallet/", false);
+    }
     if (httpRPCTimerInterface) {
         RPCUnsetTimerInterface(httpRPCTimerInterface.get());
         httpRPCTimerInterface.reset();

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright (c) 2015-2016 The Bitcoin Core developers
+# Copyright (c) 2015-2019 The Bitcoin Core developers
 # Distributed under the MIT software license, see the accompanying
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
 """Functionality to build scripts, as well as SignatureHash().
@@ -8,7 +8,6 @@ This file is modified from python-bitcoinlib.
 """
 
 from .bignum import bn2vch
-from binascii import hexlify
 import hashlib
 import struct
 
@@ -243,6 +242,9 @@ OP_NOP10 = CScriptOp(0xb9)
 OP_CHECKDATASIG = CScriptOp(0xba)
 OP_CHECKDATASIGVERIFY = CScriptOp(0xbb)
 
+# additional byte string operations
+OP_REVERSEBYTES = CScriptOp(0xbc)
+
 # multi-byte opcodes
 OP_PREFIX_BEGIN = CScriptOp(0xf0)
 OP_PREFIX_END = CScriptOp(0xf7)
@@ -472,7 +474,8 @@ class CScript(bytes):
                     yield cls.__coerce_instance(instance)
             # Annoyingly on both python2 and python3 bytes.join() always
             # returns a bytes instance even when subclassed.
-            return super(CScript, cls).__new__(cls, b''.join(coerce_iterable(value)))
+            return super(CScript, cls).__new__(
+                cls, b''.join(coerce_iterable(value)))
 
     def raw_iter(self):
         """Raw iteration
@@ -558,7 +561,7 @@ class CScript(bytes):
     def __repr__(self):
         def _repr(o):
             if isinstance(o, bytes):
-                return "x('{}')".format(hexlify(o).decode('ascii'))
+                return "x('{}')".format(o.hex())
             else:
                 return repr(o)
 
@@ -637,7 +640,8 @@ def SignatureHash(script, txTo, inIdx, hashtype):
     HASH_ONE = b'\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00'
 
     if inIdx >= len(txTo.vin):
-        return (HASH_ONE, "inIdx {} out of range ({})".format(inIdx, len(txTo.vin)))
+        return (HASH_ONE, "inIdx {} out of range ({})".format(
+            inIdx, len(txTo.vin)))
     txtmp = CTransaction(txTo)
 
     for txin in txtmp.vin:
@@ -655,7 +659,8 @@ def SignatureHash(script, txTo, inIdx, hashtype):
     elif (hashtype & 0x1f) == SIGHASH_SINGLE:
         outIdx = inIdx
         if outIdx >= len(txtmp.vout):
-            return (HASH_ONE, "outIdx {} out of range ({})".format(outIdx, len(txtmp.vout)))
+            return (HASH_ONE, "outIdx {} out of range ({})".format(
+                outIdx, len(txtmp.vout)))
 
         tmp = txtmp.vout[outIdx]
         txtmp.vout = []
@@ -695,13 +700,15 @@ def SignatureHashForkId(script, txTo, inIdx, hashtype, amount):
             serialize_prevouts += i.prevout.serialize()
         hashPrevouts = uint256_from_str(hash256(serialize_prevouts))
 
-    if (not (hashtype & SIGHASH_ANYONECANPAY) and (hashtype & 0x1f) != SIGHASH_SINGLE and (hashtype & 0x1f) != SIGHASH_NONE):
+    if (not (hashtype & SIGHASH_ANYONECANPAY) and (hashtype & 0x1f)
+            != SIGHASH_SINGLE and (hashtype & 0x1f) != SIGHASH_NONE):
         serialize_sequence = bytes()
         for i in txTo.vin:
             serialize_sequence += struct.pack("<I", i.nSequence)
         hashSequence = uint256_from_str(hash256(serialize_sequence))
 
-    if ((hashtype & 0x1f) != SIGHASH_SINGLE and (hashtype & 0x1f) != SIGHASH_NONE):
+    if ((hashtype & 0x1f) != SIGHASH_SINGLE and (
+            hashtype & 0x1f) != SIGHASH_NONE):
         serialize_outputs = bytes()
         for o in txTo.vout:
             serialize_outputs += o.serialize()

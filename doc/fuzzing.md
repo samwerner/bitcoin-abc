@@ -1,12 +1,13 @@
-Fuzz-testing Bitcoin Core
+Fuzz-testing Bitcoin ABC
 ==========================
 
-A special test harness `test_bitcoin_fuzzy` is provided to provide an easy
-entry point for fuzzers and the like. In this document we'll describe how to
-use it with AFL.
+A special test harness in `src/test/fuzz/` is provided for each fuzz target to
+provide an easy entry point for fuzzers and the like. In this document we'll
+describe how to use it with AFL and libFuzzer.
 
-Building AFL
--------------
+## AFL
+
+### Building AFL
 
 It is recommended to always use the latest version of afl:
 ```
@@ -17,23 +18,30 @@ make
 export AFLPATH=$PWD
 ```
 
-Instrumentation
-----------------
+### Instrumentation
 
-To build Bitcoin Core using AFL instrumentation (this assumes that the
+To build Bitcoin ABC using AFL instrumentation (this assumes that the
 `AFLPATH` was set as above):
 ```
-./configure --disable-ccache --disable-shared --enable-tests CC=${AFLPATH}/afl-gcc CXX=${AFLPATH}/afl-g++
+mkdir -p buildFuzzer
+cd buildFuzzer
+cmake -GNinja .. -DCCACHE=OFF -DCMAKE_C_COMPILER=afl-gcc -DCMAKE_CXX_COMPILER=afl-g++
 export AFL_HARDEN=1
-cd src/
-make test/test_bitcoin_fuzzy
+ninja bitcoin-fuzzers
 ```
+
 We disable ccache because we don't want to pollute the ccache with instrumented
 objects, and similarly don't want to use non-instrumented cached objects linked
 in.
 
-Preparing fuzzing
-------------------
+The fuzzing can be sped up significantly (~200x) by using `afl-clang-fast` and
+`afl-clang-fast++` in place of `afl-gcc` and `afl-g++` when compiling. When
+compiling using `afl-clang-fast`/`afl-clang-fast++` the resulting
+binary will be instrumented in such a way that the AFL features "persistent
+mode" and "deferred forkserver" can be used.
+See https://github.com/mcarpenter/afl/tree/master/llvm_mode for details.
+
+### Preparing fuzzing
 
 AFL needs an input directory with examples, and an output directory where it
 will place examples that it found. These can be anywhere in the file system,
@@ -49,18 +57,39 @@ AFLOUT=$PWD/outputs
 Example inputs are available from:
 
 - https://download.visucore.com/bitcoin/bitcoin_fuzzy_in.tar.xz
-- http://strateman.ninja/fuzzing.tar.xz
 
 Extract these (or other starting inputs) into the `inputs` directory before starting fuzzing.
 
-Fuzzing
---------
+### Fuzzing
 
 To start the actual fuzzing use:
 ```
-$AFLPATH/afl-fuzz -i ${AFLIN} -o ${AFLOUT} -m52 -- test/test_bitcoin_fuzzy
+$AFLPATH/afl-fuzz -i ${AFLIN} -o ${AFLOUT} -m52 -- src/test/fuzz/fuzz_target_foo
 ```
 
 You may have to change a few kernel parameters to test optimally - `afl-fuzz`
 will print an error and suggestion if so.
 
+## libFuzzer
+
+A recent version of `clang`, the address sanitizer and libFuzzer is needed (all
+found in the `compiler-rt` runtime libraries package).
+
+To build the `test/test_bitcoin_fuzzy` executable run
+
+```
+mkdir -p buildFuzzer
+cd buildFuzzer
+cmake -GNinja .. \
+  -DCCACHE=OFF \
+  -DCMAKE_C_COMPILER=clang \
+  -DCMAKE_CXX_COMPILER=clang++ \
+  -DENABLE_SANITIZERS="fuzzer;address"
+ninja bitcoin-fuzzers
+```
+
+The fuzzer needs some inputs to work on, but the inputs or seeds can be used
+interchangeably between libFuzzer and AFL.
+
+See https://llvm.org/docs/LibFuzzer.html#running on how to run the libFuzzer
+instrumented executable.

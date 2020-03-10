@@ -1,6 +1,11 @@
+// Copyright (c) 2017-2019 The Bitcoin developers
+// Distributed under the MIT software license, see the accompanying
+// file COPYING or http://www.opensource.org/licenses/mit-license.php.
+
 #ifndef BITCOIN_SEEDER_DB_H
 #define BITCOIN_SEEDER_DB_H
 
+#include <chainparams.h>
 #include <netbase.h>
 #include <protocol.h>
 #include <seeder/bitcoin.h>
@@ -19,8 +24,8 @@
 
 #define REQUIRE_VERSION 70001
 
-static inline int GetRequireHeight(const bool testnet = fTestNet) {
-    return testnet ? 500000 : 350000;
+static inline int GetRequireHeight() {
+    return Params().Checkpoints().mapCheckpoints.rbegin()->first;
 }
 
 static inline std::string ToString(const CService &ip) {
@@ -113,19 +118,41 @@ public:
     }
 
     bool IsGood() const {
-        if (ip.GetPort() != GetDefaultPort()) return false;
-        if (!(services & NODE_NETWORK)) return false;
-        if (!ip.IsRoutable()) return false;
-        if (clientVersion && clientVersion < REQUIRE_VERSION) return false;
-        if (blocks && blocks < GetRequireHeight()) return false;
+        if (ip.GetPort() != GetDefaultPort()) {
+            return false;
+        }
+        if (!(services & NODE_NETWORK)) {
+            return false;
+        }
+        if (!ip.IsRoutable()) {
+            return false;
+        }
+        if (clientVersion && clientVersion < REQUIRE_VERSION) {
+            return false;
+        }
+        if (blocks && blocks < GetRequireHeight()) {
+            return false;
+        }
 
-        if (total <= 3 && success * 2 >= total) return true;
+        if (total <= 3 && success * 2 >= total) {
+            return true;
+        }
 
-        if (stat2H.reliability > 0.85 && stat2H.count > 2) return true;
-        if (stat8H.reliability > 0.70 && stat8H.count > 4) return true;
-        if (stat1D.reliability > 0.55 && stat1D.count > 8) return true;
-        if (stat1W.reliability > 0.45 && stat1W.count > 16) return true;
-        if (stat1M.reliability > 0.35 && stat1M.count > 32) return true;
+        if (stat2H.reliability > 0.85 && stat2H.count > 2) {
+            return true;
+        }
+        if (stat8H.reliability > 0.70 && stat8H.count > 4) {
+            return true;
+        }
+        if (stat1D.reliability > 0.55 && stat1D.count > 8) {
+            return true;
+        }
+        if (stat1W.reliability > 0.45 && stat1W.count > 16) {
+            return true;
+        }
+        if (stat1M.reliability > 0.35 && stat1M.count > 32) {
+            return true;
+        }
 
         return false;
     }
@@ -208,9 +235,15 @@ public:
         READWRITE(total);
         READWRITE(success);
         READWRITE(clientVersion);
-        if (version >= 2) READWRITE(clientSubVersion);
-        if (version >= 3) READWRITE(blocks);
-        if (version >= 4) READWRITE(ourLastSuccess);
+        if (version >= 2) {
+            READWRITE(clientSubVersion);
+        }
+        if (version >= 3) {
+            READWRITE(blocks);
+        }
+        if (version >= 4) {
+            READWRITE(ourLastSuccess);
+        }
     }
 };
 
@@ -264,18 +297,14 @@ protected:
     // internal routines that assume proper locks are acquired
     // add an address
     void Add_(const CAddress &addr, bool force);
-    // get an IP to test (must call Good_, Bad_, or Skipped_ on result
-    // afterwards)
+    // get an IP to test (must call Good_ or Bad_ on result afterwards)
     bool Get_(CServiceResult &ip, int &wait);
-    bool GetMany_(std::vector<CServiceResult> &ips, int max, int &wait);
     // mark an IP as good (must have been returned by Get_)
     void Good_(const CService &ip, int clientV, std::string clientSV,
                int blocks);
     // mark an IP as bad (and optionally ban it) (must have been returned by
     // Get_)
     void Bad_(const CService &ip, int ban);
-    // mark an IP as skipped (must have been returned by Get_)
-    void Skipped_(const CService &ip);
     // look up id of an IP
     int Lookup_(const CService &ip);
     // get a random set of IPs (shared lock only)
@@ -370,7 +399,9 @@ public:
                 db->ipToId[info.ip] = id;
                 if (info.ourLastTry) {
                     db->ourId.push_back(id);
-                    if (info.IsGood()) db->goodId.insert(id);
+                    if (info.IsGood()) {
+                        db->goodId.insert(id);
+                    }
                 } else {
                     db->unkId.insert(id);
                 }
@@ -391,27 +422,6 @@ public:
         for (size_t i = 0; i < vAddr.size(); i++) {
             Add_(vAddr[i], fForce);
         }
-    }
-
-    void Good(const CService &addr, int clientVersion,
-              std::string clientSubVersion, int blocks) {
-        LOCK(cs);
-        Good_(addr, clientVersion, clientSubVersion, blocks);
-    }
-
-    void Skipped(const CService &addr) {
-        LOCK(cs);
-        Skipped_(addr);
-    }
-
-    void Bad(const CService &addr, int ban = 0) {
-        LOCK(cs);
-        Bad_(addr, ban);
-    }
-
-    bool Get(CServiceResult &ip, int &wait) {
-        LOCK(cs);
-        return Get_(ip, wait);
     }
 
     void GetMany(std::vector<CServiceResult> &ips, int max, int &wait) {

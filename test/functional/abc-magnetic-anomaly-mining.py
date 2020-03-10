@@ -25,9 +25,11 @@ class CTORMiningTest(BitcoinTestFramework):
         self.blocks = {}
         self.mocktime = int(time.time()) - 600 * 100
 
-        extra_arg = ['-spendzeroconfchange=0', '-whitelist=127.0.0.1',
-                     "-replayprotectionactivationtime={}".format(10 * self.mocktime)]
+        extra_arg = ['-spendzeroconfchange=0', '-whitelist=127.0.0.1']
         self.extra_args = [extra_arg, extra_arg]
+
+    def skip_test_if_missing_module(self):
+        self.skip_if_no_wallet()
 
     def run_test(self):
         mining_node = self.nodes[0]
@@ -67,7 +69,8 @@ class CTORMiningTest(BitcoinTestFramework):
             fee = decimal.Decimal(random.randint(
                 1000, 2000)) / decimal.Decimal(1e8)
             # Spend to the same number of outputs as inputs, so we can leave
-            # the amounts unchanged and avoid rounding errors.
+            # the amounts unchanged and avoid rounding errors. This also ensures
+            # the number of sigops == number of sigchecks.
             #
             # NOTE: There will be 1 sigop per output (which equals the number
             # of inputs now).  We need this randomization to ensure the
@@ -108,10 +111,10 @@ class CTORMiningTest(BitcoinTestFramework):
             txid_decoded = int(txid, 16)
 
             # Assert we got the expected metadata
-            assert(expectedFeeSats == txn['fee'])
-            assert(expectedSigOps == txn['sigops'])
+            assert expectedFeeSats == txn['fee']
+            assert expectedSigOps == txn['sigops']
             # Assert transaction ids are in order
-            assert(last_txid == 0 or last_txid < txid_decoded)
+            assert last_txid == 0 or last_txid < txid_decoded
             last_txid = txid_decoded
 
 

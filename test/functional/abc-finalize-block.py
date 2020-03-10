@@ -32,7 +32,7 @@ class FinalizeBlockTest(BitcoinTestFramework):
         self.mocktime = int(time.time())
 
         self.log.info("Test block finalization...")
-        node.generate(10)
+        node.generatetoaddress(10, node.get_deterministic_priv_key().address)
         tip = node.getbestblockhash()
         node.finalizeblock(tip)
         assert_equal(node.getbestblockhash(), tip)
@@ -75,23 +75,26 @@ class FinalizeBlockTest(BitcoinTestFramework):
             def check_block():
                 for tip in node.getchaintips():
                     if tip["hash"] == block:
-                        assert(tip["status"] != "active")
+                        assert tip["status"] != "active"
                         return tip["status"] == status
                 return False
             wait_until(check_block)
 
         # First block header is accepted as valid-header
-        alt_node.generate(1)
+        alt_node.generatetoaddress(
+            1, alt_node.get_deterministic_priv_key().address)
         wait_for_block(node, alt_node.getbestblockhash(), "valid-headers")
 
         # Second block header is accepted but set invalid
-        alt_node.generate(1)
+        alt_node.generatetoaddress(
+            1, alt_node.get_deterministic_priv_key().address)
         invalid_block = alt_node.getbestblockhash()
         wait_for_block(node, invalid_block)
 
         # Later block headers are rejected
         for i in range(2, 9):
-            alt_node.generate(1)
+            alt_node.generatetoaddress(
+                1, alt_node.get_deterministic_priv_key().address)
             assert_raises_rpc_error(-5, RPC_BLOCK_NOT_FOUND_ERROR,
                                     node.getblockheader, alt_node.getbestblockhash())
 
@@ -145,7 +148,8 @@ class FinalizeBlockTest(BitcoinTestFramework):
         # (200)->(201)-> // ->(209 finalized)->(210)
         node.reconsiderblock(invalid_block)
 
-        alt_node_tip = alt_node.generate(1)[-1]
+        alt_node_tip = alt_node.generatetoaddress(
+            1, alt_node.get_deterministic_priv_key().address)[-1]
         wait_for_tip(node, alt_node_tip)
 
         assert_equal(node.getbestblockhash(), alt_node.getbestblockhash())
@@ -191,8 +195,10 @@ class FinalizeBlockTest(BitcoinTestFramework):
         #                          /
         # (200)->(201)-> // ->(209)->(210 invalid)
         node.reconsiderblock(alt_node.getbestblockhash())
-        block_to_autofinalize = alt_node.generate(1)[-1]
-        alt_node_new_tip = alt_node.generate(9)[-1]
+        block_to_autofinalize = alt_node.generatetoaddress(
+            1, alt_node.get_deterministic_priv_key().address)[-1]
+        alt_node_new_tip = alt_node.generatetoaddress(
+            9, alt_node.get_deterministic_priv_key().address)[-1]
         wait_for_tip(node, alt_node_new_tip)
 
         assert_equal(node.getbestblockhash(), alt_node.getbestblockhash())
@@ -201,7 +207,8 @@ class FinalizeBlockTest(BitcoinTestFramework):
 
         self.log.info(
             "Try to finalize a block on an already finalized chain...")
-        # Finalizing a block of an already finalized chain should have no effect
+        # Finalizing a block of an already finalized chain should have no
+        # effect
         block_218 = node.getblockheader(alt_node_tip)['previousblockhash']
         node.finalizeblock(block_218)
         assert_equal(node.getfinalizedblockhash(), alt_node_tip)
@@ -267,19 +274,23 @@ class FinalizeBlockTest(BitcoinTestFramework):
         # (200)->(201)-> // ->(209)->(210)
         self.mocktime += self.finalization_delay
         set_node_times([delay_node], self.mocktime)
-        new_tip = alt_node.generate(1)[-1]
-        wait_for_tip(delay_node, new_tip)
+        new_tip = alt_node.generatetoaddress(
+            1, alt_node.get_deterministic_priv_key().address)[-1]
 
         assert_equal(alt_node.getbestblockhash(), new_tip)
-        assert_equal(node.getfinalizedblockhash(), block_to_autofinalize)
         assert_equal(alt_node.getfinalizedblockhash(), block_to_autofinalize)
 
+        wait_for_tip(node, new_tip)
+        assert_equal(node.getfinalizedblockhash(), block_to_autofinalize)
+
+        wait_for_tip(delay_node, new_tip)
         self.log.info(
             "Check that finalization delay is effective on node boot")
         # Restart the new node, so the blocks have no header received time.
         self.restart_node(2)
 
-        # There should be no finalized block (getfinalizedblockhash returns an empty string)
+        # There should be no finalized block (getfinalizedblockhash returns an
+        # empty string)
         assert_equal(delay_node.getfinalizedblockhash(), str())
 
         # Generate 20 blocks with no delay. This should not trigger auto-finalization.
@@ -290,7 +301,8 @@ class FinalizeBlockTest(BitcoinTestFramework):
         #                           >(220)-> // ->(250 tip)
         #                          /
         # (200)->(201)-> // ->(209)->(210)
-        blocks = delay_node.generate(20)
+        blocks = delay_node.generatetoaddress(
+            20, alt_node.get_deterministic_priv_key().address)
         reboot_autofinalized_block = blocks[10]
         new_tip = blocks[-1]
         wait_for_tip(delay_node, new_tip)
@@ -308,7 +320,8 @@ class FinalizeBlockTest(BitcoinTestFramework):
         # (200)->(201)-> // ->(209)->(210)
         self.mocktime += self.finalization_delay
         set_node_times([delay_node], self.mocktime)
-        new_tip = delay_node.generate(1)[-1]
+        new_tip = delay_node.generatetoaddress(
+            1, delay_node.get_deterministic_priv_key().address)[-1]
         wait_for_tip(delay_node, new_tip)
 
         assert_equal(delay_node.getfinalizedblockhash(),

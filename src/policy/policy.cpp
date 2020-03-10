@@ -26,7 +26,7 @@ Amount GetDustThreshold(const CTxOut &txout, const CFeeRate &dustRelayFeeIn) {
         return Amount::zero();
     }
 
-    size_t nSize = GetSerializeSize(txout, SER_DISK, 0);
+    size_t nSize = GetSerializeSize(txout);
 
     // the 148 mentioned above
     nSize += (32 + 4 + 1 + 107 + 4);
@@ -40,16 +40,20 @@ bool IsDust(const CTxOut &txout, const CFeeRate &dustRelayFeeIn) {
 
 bool IsStandard(const CScript &scriptPubKey, txnouttype &whichType) {
     std::vector<std::vector<uint8_t>> vSolutions;
-    if (!Solver(scriptPubKey, whichType, vSolutions)) {
-        return false;
-    }
+    whichType = Solver(scriptPubKey, vSolutions);
 
-    if (whichType == TX_MULTISIG) {
+    if (whichType == TX_NONSTANDARD) {
+        return false;
+    } else if (whichType == TX_MULTISIG) {
         uint8_t m = vSolutions.front()[0];
         uint8_t n = vSolutions.back()[0];
         // Support up to x-of-3 multisig txns as standard
-        if (n < 1 || n > 3) return false;
-        if (m < 1 || m > n) return false;
+        if (n < 1 || n > 3) {
+            return false;
+        }
+        if (m < 1 || m > n) {
+            return false;
+        }
     } else if (whichType == TX_NULL_DATA) {
         if (!fAcceptDatacarrier) {
             return false;
@@ -62,7 +66,7 @@ bool IsStandard(const CScript &scriptPubKey, txnouttype &whichType) {
         }
     }
 
-    return whichType != TX_NONSTANDARD;
+    return true;
 }
 
 bool IsStandardTx(const CTransaction &tx, std::string &reason) {
@@ -136,8 +140,8 @@ bool IsStandardTx(const CTransaction &tx, std::string &reason) {
  * expensive-to-check-upon-redemption script like:
  *   DUP CHECKSIG DROP ... repeated 100 times... OP_1
  */
-bool AreInputsStandard(const CTransaction &tx,
-                       const CCoinsViewCache &mapInputs) {
+bool AreInputsStandard(const CTransaction &tx, const CCoinsViewCache &mapInputs,
+                       uint32_t flags) {
     if (tx.IsCoinBase()) {
         // Coinbases don't use vin normally.
         return true;
@@ -147,27 +151,11 @@ bool AreInputsStandard(const CTransaction &tx,
         const CTxOut &prev = mapInputs.GetOutputFor(in);
 
         std::vector<std::vector<uint8_t>> vSolutions;
-        txnouttype whichType;
-        // get the scriptPubKey corresponding to this input:
-        const CScript &prevScript = prev.scriptPubKey;
-        if (!Solver(prevScript, whichType, vSolutions)) {
+        txnouttype whichType = Solver(prev.scriptPubKey, vSolutions);
+        if (whichType == TX_NONSTANDARD) {
             return false;
-        }
-
-        if (whichType == TX_SCRIPTHASH) {
-            std::vector<std::vector<uint8_t>> stack;
-            // convert the scriptSig into a stack, so we can inspect the
-            // redeemScript
-            if (!EvalScript(stack, in.scriptSig, SCRIPT_VERIFY_NONE,
-                            BaseSignatureChecker())) {
-                return false;
-            }
-            if (stack.empty()) {
-                return false;
-            }
-
-            CScript subscript(stack.back().begin(), stack.back().end());
-            if (subscript.GetSigOpCount(STANDARD_SCRIPT_VERIFY_FLAGS, true) >
+        } else if (whichType == TX_SCRIPTHASH) {
+            if (prev.scriptPubKey.GetSigOpCount(flags, in.scriptSig) >
                 MAX_P2SH_SIGOPS) {
                 return false;
             }
@@ -180,21 +168,19 @@ bool AreInputsStandard(const CTransaction &tx,
 CFeeRate dustRelayFee = CFeeRate(DUST_RELAY_TX_FEE);
 uint32_t nBytesPerSigOp = DEFAULT_BYTES_PER_SIGOP;
 
-int64_t GetVirtualTransactionSize(int64_t nSize, int64_t nSigOpCost,
+int64_t GetVirtualTransactionSize(int64_t nSize, int64_t nSigOpCount,
                                   unsigned int bytes_per_sigop) {
-    return nSize;
+    return std::max(nSize, nSigOpCount * bytes_per_sigop);
 }
 
-int64_t GetVirtualTransactionSize(const CTransaction &tx, int64_t nSigOpCost,
+int64_t GetVirtualTransactionSize(const CTransaction &tx, int64_t nSigOpCount,
                                   unsigned int bytes_per_sigop) {
-    return GetVirtualTransactionSize(
-        ::GetSerializeSize(tx, SER_NETWORK, PROTOCOL_VERSION), nSigOpCost,
-        bytes_per_sigop);
+    return GetVirtualTransactionSize(::GetSerializeSize(tx, PROTOCOL_VERSION),
+                                     nSigOpCount, bytes_per_sigop);
 }
 
-int64_t GetVirtualTransactionInputSize(const CTxIn &txin, int64_t nSigOpCost,
+int64_t GetVirtualTransactionInputSize(const CTxIn &txin, int64_t nSigOpCount,
                                        unsigned int bytes_per_sigop) {
-    return GetVirtualTransactionSize(
-        ::GetSerializeSize(txin, SER_NETWORK, PROTOCOL_VERSION), nSigOpCost,
-        bytes_per_sigop);
+    return GetVirtualTransactionSize(::GetSerializeSize(txin, PROTOCOL_VERSION),
+                                     nSigOpCount, bytes_per_sigop);
 }

@@ -1,6 +1,6 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
 // Copyright (c) 2009-2016 The Bitcoin Core developers
-// Copyright (c) 2017 The Bitcoin developers
+// Copyright (c) 2017-2019 The Bitcoin developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -70,7 +70,7 @@ public:
 };
 
 static const size_t MAX_INPUTS_PER_TX =
-    MAX_TX_SIZE / ::GetSerializeSize(CTxIn(), SER_NETWORK, PROTOCOL_VERSION);
+    MAX_TX_SIZE / ::GetSerializeSize(CTxIn(), PROTOCOL_VERSION);
 
 /** Restore the UTXO in a Coin at a given COutPoint */
 class CTxUndo {

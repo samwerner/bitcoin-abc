@@ -17,13 +17,10 @@
 #include <util/strencodings.h>
 #include <util/time.h>
 
-#include <boost/interprocess/sync/file_lock.hpp>
 #include <boost/thread.hpp>
 
-#include <openssl/conf.h>
-#include <openssl/rand.h>
-
 #include <cstdarg>
+#include <memory>
 
 #if (defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__DragonFly__))
 #include <pthread.h>
@@ -94,59 +91,12 @@ const char *const BITCOIN_PID_FILENAME = "bitcoind.pid";
 
 ArgsManager gArgs;
 
-/** Init OpenSSL library multithreading support */
-static std::unique_ptr<CCriticalSection[]> ppmutexOpenSSL;
-void locking_callback(int mode, int i, const char *file,
-                      int line) NO_THREAD_SAFETY_ANALYSIS {
-    if (mode & CRYPTO_LOCK) {
-        ENTER_CRITICAL_SECTION(ppmutexOpenSSL[i]);
-    } else {
-        LEAVE_CRITICAL_SECTION(ppmutexOpenSSL[i]);
-    }
-}
-
-// Singleton for wrapping OpenSSL setup/teardown.
-class CInit {
-public:
-    CInit() {
-        // Init OpenSSL library multithreading support.
-        ppmutexOpenSSL.reset(new CCriticalSection[CRYPTO_num_locks()]);
-        CRYPTO_set_locking_callback(locking_callback);
-
-        // OpenSSL can optionally load a config file which lists optional
-        // loadable modules and engines. We don't use them so we don't require
-        // the config. However some of our libs may call functions which attempt
-        // to load the config file, possibly resulting in an exit() or crash if
-        // it is missing or corrupt. Explicitly tell OpenSSL not to try to load
-        // the file. The result for our libs will be that the config appears to
-        // have been loaded and there are no modules/engines available.
-        OPENSSL_no_config();
-
-#ifdef WIN32
-        // Seed OpenSSL PRNG with current contents of the screen.
-        RAND_screen();
-#endif
-
-        // Seed OpenSSL PRNG with performance counter.
-        RandAddSeed();
-    }
-    ~CInit() {
-        // Securely erase the memory used by the PRNG.
-        RAND_cleanup();
-        // Shutdown OpenSSL library multithreading support.
-        CRYPTO_set_locking_callback(nullptr);
-        // Clear the set of locks now to maintain symmetry with the constructor.
-        ppmutexOpenSSL.reset();
-    }
-} instance_of_cinit;
-
 /**
  * A map that contains all the currently held directory locks. After successful
  * locking, these will be held here until the global destructor cleans them up
  * and thus automatically unlocks them, or ReleaseDirectoryLocks is called.
  */
-static std::map<std::string, std::unique_ptr<boost::interprocess::file_lock>>
-    dir_locks;
+static std::map<std::string, std::unique_ptr<fsbridge::FileLock>> dir_locks;
 /** Mutex to protect dir_locks. */
 static std::mutex cs_dir_locks;
 
@@ -166,22 +116,22 @@ bool LockDirectory(const fs::path &directory, const std::string lockfile_name,
     if (file) {
         fclose(file);
     }
-
-    try {
-        auto lock = std::make_unique<boost::interprocess::file_lock>(
-            pathLockFile.string().c_str());
-        if (!lock->try_lock()) {
-            return false;
-        }
-        if (!probe_only) {
-            // Lock successful and we're not just probing, put it into the map
-            dir_locks.emplace(pathLockFile.string(), std::move(lock));
-        }
-    } catch (const boost::interprocess::interprocess_exception &e) {
+    auto lock = std::make_unique<fsbridge::FileLock>(pathLockFile);
+    if (!lock->TryLock()) {
         return error("Error while attempting to lock directory %s: %s",
-                     directory.string(), e.what());
+                     directory.string(), lock->GetReason());
+    }
+    if (!probe_only) {
+        // Lock successful and we're not just probing, put it into the map
+        dir_locks.emplace(pathLockFile.string(), std::move(lock));
     }
     return true;
+}
+
+void UnlockDirectory(const fs::path &directory,
+                     const std::string &lockfile_name) {
+    std::lock_guard<std::mutex> lock(cs_dir_locks);
+    dir_locks.erase((directory / lockfile_name).string());
 }
 
 void ReleaseDirectoryLocks() {
@@ -243,7 +193,8 @@ public:
     /** Determine whether to use config settings in the default section,
      *  See also comments around ArgsManager::ArgsManager() below. */
     static inline bool UseDefaultSection(const ArgsManager &am,
-                                         const std::string &arg) {
+                                         const std::string &arg)
+        EXCLUSIVE_LOCKS_REQUIRED(am.cs_args) {
         return (am.m_network == CBaseChainParams::MAIN ||
                 am.m_network_only_args.count(arg) == 0);
     }
@@ -327,7 +278,8 @@ public:
      * confused by craziness like "[regtest] testnet=1"
      */
     static inline bool GetNetBoolArg(const ArgsManager &am,
-                                     const std::string &net_arg) {
+                                     const std::string &net_arg)
+        EXCLUSIVE_LOCKS_REQUIRED(am.cs_args) {
         std::pair<bool, std::string> found_result(false, std::string());
         found_result = GetArgHelper(am.m_override_args, net_arg, true);
         if (!found_result.first) {
@@ -401,6 +353,8 @@ ArgsManager::ArgsManager()
 }
 
 void ArgsManager::WarnForSectionOnlyArgs() {
+    LOCK(cs_args);
+
     // if there's no section selected, don't worry
     if (m_network.empty()) {
         return;
@@ -441,7 +395,32 @@ void ArgsManager::WarnForSectionOnlyArgs() {
 }
 
 void ArgsManager::SelectConfigNetwork(const std::string &network) {
+    LOCK(cs_args);
     m_network = network;
+}
+
+bool ParseKeyValue(std::string &key, std::string &val) {
+    size_t is_index = key.find('=');
+    if (is_index != std::string::npos) {
+        val = key.substr(is_index + 1);
+        key.erase(is_index);
+    }
+#ifdef WIN32
+    std::transform(key.begin(), key.end(), key.begin(), ::tolower);
+    if (key[0] == '/') {
+        key[0] = '-';
+    }
+#endif
+
+    if (key[0] != '-') {
+        return false;
+    }
+
+    // Transform --foo to -foo
+    if (key.length() > 1 && key[1] == '-') {
+        key.erase(0, 1);
+    }
+    return true;
 }
 
 bool ArgsManager::ParseParameters(int argc, const char *const argv[],
@@ -452,25 +431,8 @@ bool ArgsManager::ParseParameters(int argc, const char *const argv[],
     for (int i = 1; i < argc; i++) {
         std::string key(argv[i]);
         std::string val;
-        size_t is_index = key.find('=');
-        if (is_index != std::string::npos) {
-            val = key.substr(is_index + 1);
-            key.erase(is_index);
-        }
-#ifdef WIN32
-        std::transform(key.begin(), key.end(), key.begin(), ::tolower);
-        if (key[0] == '/') {
-            key[0] = '-';
-        }
-#endif
-
-        if (key[0] != '-') {
+        if (!ParseKeyValue(key, val)) {
             break;
-        }
-
-        // Transform --foo to -foo
-        if (key.length() > 1 && key[1] == '-') {
-            key.erase(0, 1);
         }
 
         // Check for -nofoo
@@ -494,12 +456,11 @@ bool ArgsManager::ParseParameters(int argc, const char *const argv[],
     if (it != m_override_args.end()) {
         if (it->second.size() > 0) {
             for (const auto &ic : it->second) {
-                fprintf(stderr,
-                        "warning: -includeconf cannot be used from "
-                        "commandline; ignoring -includeconf=%s\n",
-                        ic.c_str());
+                error += "-includeconf cannot be used from commandline; "
+                         "-includeconf=" +
+                         ic + "\n";
             }
-            m_override_args.erase(it);
+            return false;
         }
     }
     return true;
@@ -515,6 +476,7 @@ bool ArgsManager::IsArgKnown(const std::string &key) const {
             std::string("-") + key.substr(option_index + 1, std::string::npos);
     }
 
+    LOCK(cs_args);
     for (const auto &arg_map : m_available_args) {
         if (arg_map.second.count(arg_no_net)) {
             return true;
@@ -658,12 +620,19 @@ void ArgsManager::AddArg(const std::string &name, const std::string &help,
         eq_index = name.size();
     }
 
+    LOCK(cs_args);
     std::map<std::string, Arg> &arg_map = m_available_args[cat];
     auto ret = arg_map.emplace(
         name.substr(0, eq_index),
         Arg(name.substr(eq_index, name.size() - eq_index), help, debug_only));
     // Make sure an insertion actually happened.
     assert(ret.second);
+}
+
+void ArgsManager::AddHiddenArgs(const std::vector<std::string> &names) {
+    for (const std::string &name : names) {
+        AddArg(name, "", false, OptionsCategory::HIDDEN);
+    }
 }
 
 void ArgsManager::ClearArg(const std::string &strArg) {
@@ -676,6 +645,7 @@ std::string ArgsManager::GetHelpMessage() const {
     const bool show_debug = gArgs.GetBoolArg("-help-debug", false);
 
     std::string usage = "";
+    LOCK(cs_args);
     for (const auto &arg_map : m_available_args) {
         switch (arg_map.first) {
             case OptionsCategory::OPTIONS:
@@ -820,7 +790,6 @@ static fs::path pathCachedNetSpecific;
 static CCriticalSection csPathCached;
 
 const fs::path &GetBlocksDir() {
-
     LOCK(csPathCached);
 
     fs::path &path = g_blocks_path_cache_net_specific;
@@ -908,37 +877,64 @@ static std::string TrimString(const std::string &str,
     return str.substr(front, end - front + 1);
 }
 
-static std::vector<std::pair<std::string, std::string>>
-GetConfigOptions(std::istream &stream) {
-    std::vector<std::pair<std::string, std::string>> options;
+static bool
+GetConfigOptions(std::istream &stream, std::string &error,
+                 std::vector<std::pair<std::string, std::string>> &options) {
     std::string str, prefix;
     std::string::size_type pos;
+    int linenr = 1;
     while (std::getline(stream, str)) {
+        bool used_hash = false;
         if ((pos = str.find('#')) != std::string::npos) {
             str = str.substr(0, pos);
+            used_hash = true;
         }
         const static std::string pattern = " \t\r\n";
         str = TrimString(str, pattern);
         if (!str.empty()) {
             if (*str.begin() == '[' && *str.rbegin() == ']') {
                 prefix = str.substr(1, str.size() - 2) + '.';
+            } else if (*str.begin() == '-') {
+                error = strprintf(
+                    "parse error on line %i: %s, options in configuration file "
+                    "must be specified without leading -",
+                    linenr, str);
+                return false;
             } else if ((pos = str.find('=')) != std::string::npos) {
                 std::string name =
                     prefix + TrimString(str.substr(0, pos), pattern);
                 std::string value = TrimString(str.substr(pos + 1), pattern);
+                if (used_hash && name == "rpcpassword") {
+                    error = strprintf(
+                        "parse error on line %i, using # in rpcpassword can be "
+                        "ambiguous and should be avoided",
+                        linenr);
+                    return false;
+                }
                 options.emplace_back(name, value);
+            } else {
+                error = strprintf("parse error on line %i: %s", linenr, str);
+                if (str.size() >= 2 && str.substr(0, 2) == "no") {
+                    error += strprintf(", if you intended to specify a negated "
+                                       "option, use %s=1 instead",
+                                       str);
+                }
+                return false;
             }
         }
+        ++linenr;
     }
-    return options;
+    return true;
 }
 
 bool ArgsManager::ReadConfigStream(std::istream &stream, std::string &error,
                                    bool ignore_invalid_keys) {
     LOCK(cs_args);
-
-    for (const std::pair<std::string, std::string> &option :
-         GetConfigOptions(stream)) {
+    std::vector<std::pair<std::string, std::string>> options;
+    if (!GetConfigOptions(stream, error, options)) {
+        return false;
+    }
+    for (const std::pair<std::string, std::string> &option : options) {
         std::string strKey = std::string("-") + option.first;
         std::string strValue = option.second;
 
@@ -982,13 +978,14 @@ bool ArgsManager::ReadConfigFiles(std::string &error,
             emptyIncludeConf = m_override_args.count("-includeconf") == 0;
         }
         if (emptyIncludeConf) {
+            std::string chain_id = GetChainName();
             std::vector<std::string> includeconf(GetArgs("-includeconf"));
             {
                 // We haven't set m_network yet (that happens in
                 // SelectParams()), so manually check for network.includeconf
                 // args.
-                std::vector<std::string> includeconf_net(GetArgs(
-                    std::string("-") + GetChainName() + ".includeconf"));
+                std::vector<std::string> includeconf_net(
+                    GetArgs(std::string("-") + chain_id + ".includeconf"));
                 includeconf.insert(includeconf.end(), includeconf_net.begin(),
                                    includeconf_net.end());
             }
@@ -998,7 +995,7 @@ bool ArgsManager::ReadConfigFiles(std::string &error,
             {
                 LOCK(cs_args);
                 m_config_args.erase("-includeconf");
-                m_config_args.erase(std::string("-") + GetChainName() +
+                m_config_args.erase(std::string("-") + chain_id +
                                     ".includeconf");
             }
 
@@ -1012,18 +1009,29 @@ bool ArgsManager::ReadConfigFiles(std::string &error,
                     LogPrintf("Included configuration file %s\n",
                               to_include.c_str());
                 } else {
-                    fprintf(stderr, "Failed to include configuration file %s\n",
-                            to_include.c_str());
+                    error =
+                        "Failed to include configuration file " + to_include;
+                    return false;
                 }
             }
 
             // Warn about recursive -includeconf
             includeconf = GetArgs("-includeconf");
             {
-                std::vector<std::string> includeconf_net(GetArgs(
-                    std::string("-") + GetChainName() + ".includeconf"));
+                std::vector<std::string> includeconf_net(
+                    GetArgs(std::string("-") + chain_id + ".includeconf"));
                 includeconf.insert(includeconf.end(), includeconf_net.begin(),
                                    includeconf_net.end());
+                std::string chain_id_final = GetChainName();
+                if (chain_id_final != chain_id) {
+                    // Also warn about recursive includeconf for the chain that
+                    // was specified in one of the includeconfs
+                    includeconf_net = GetArgs(std::string("-") +
+                                              chain_id_final + ".includeconf");
+                    includeconf.insert(includeconf.end(),
+                                       includeconf_net.begin(),
+                                       includeconf_net.end());
+                }
             }
             for (const std::string &to_include : includeconf) {
                 fprintf(stderr,
@@ -1045,6 +1053,7 @@ bool ArgsManager::ReadConfigFiles(std::string &error,
 }
 
 std::string ArgsManager::GetChainName() const {
+    LOCK(cs_args);
     bool fRegTest = ArgsManagerHelper::GetNetBoolArg(*this, "-regtest");
     bool fTestNet = ArgsManagerHelper::GetNetBoolArg(*this, "-testnet");
 

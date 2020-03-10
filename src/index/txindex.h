@@ -8,6 +8,8 @@
 #include <index/base.h>
 #include <txdb.h>
 
+#include <memory>
+
 /**
  * TxIndex is used to look up transactions included in the blockchain by ID.
  * The index is written to a LevelDB database and records the filesystem
@@ -46,7 +48,7 @@ public:
     /// in.
     /// @param[out]  tx  The transaction itself.
     /// @return  true if transaction is found, false otherwise
-    bool FindTx(const TxId &txid, uint256 &block_hash,
+    bool FindTx(const TxId &txid, BlockHash &block_hash,
                 CTransactionRef &tx) const;
 };
 

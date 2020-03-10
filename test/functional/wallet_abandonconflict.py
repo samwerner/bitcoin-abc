@@ -29,6 +29,9 @@ class AbandonConflictTest(BitcoinTestFramework):
         self.num_nodes = 2
         self.extra_args = [["-minrelaytxfee=0.00001"], []]
 
+    def skip_test_if_missing_module(self):
+        self.skip_if_no_wallet()
+
     def run_test(self):
         def total_fees(*txids):
             total = 0
@@ -60,10 +63,11 @@ class AbandonConflictTest(BitcoinTestFramework):
         newbalance = self.nodes[0].getbalance()
 
         # no more than fees lost
-        assert(balance - newbalance <= total_fees(txA, txB, txC))
+        assert balance - newbalance <= total_fees(txA, txB, txC)
         balance = newbalance
 
-        # Disconnect nodes so node0's transactions don't get into node1's mempool
+        # Disconnect nodes so node0's transactions don't get into node1's
+        # mempool
         disconnect_nodes(self.nodes[0], self.nodes[1])
 
         # Identify the 10btc outputs
@@ -108,7 +112,8 @@ class AbandonConflictTest(BitcoinTestFramework):
         outputs = {self.nodes[0].getnewaddress(): signed3_change}
         signed3 = self.nodes[0].signrawtransactionwithwallet(
             self.nodes[0].createrawtransaction(inputs, outputs))
-        # note tx is never directly referenced, only abandoned as a child of the above
+        # note tx is never directly referenced, only abandoned as a child of
+        # the above
         self.nodes[0].sendrawtransaction(signed3["hex"])
 
         # In mempool txs from self should increase balance from change
@@ -126,7 +131,8 @@ class AbandonConflictTest(BitcoinTestFramework):
         assert_equal(len(self.nodes[1].getrawmempool()), 0)
 
         # Transactions which are not in the mempool should only reduce wallet balance.
-        # Transaction inputs should still be spent, but the change not yet received.
+        # Transaction inputs should still be spent, but the change not yet
+        # received.
         newbalance = self.nodes[0].getbalance()
         assert_equal(newbalance, balance - signed3_change)
         # Unconfirmed received funds that are not in mempool also shouldn't show
@@ -137,8 +143,8 @@ class AbandonConflictTest(BitcoinTestFramework):
         assert_equal(unconfbalance, newbalance)
         # Unconfirmed transactions which are not in the mempool should also
         # not be in listunspent
-        assert(not txABC2 in [utxo["txid"]
-                              for utxo in self.nodes[0].listunspent(0)])
+        assert txABC2 not in [utxo["txid"]
+                              for utxo in self.nodes[0].listunspent(0)]
         balance = newbalance
 
         # Abandon original transaction and verify inputs are available again
@@ -168,8 +174,8 @@ class AbandonConflictTest(BitcoinTestFramework):
         # Send child tx again so it is no longer abandoned.
         self.nodes[0].sendrawtransaction(signed2["hex"])
         newbalance = self.nodes[0].getbalance()
-        assert_equal(newbalance, balance - Decimal("10") -
-                     Decimal("14.99998") + Decimal("24.9996"))
+        assert_equal(newbalance, balance - Decimal("10")
+                     - Decimal("14.99998") + Decimal("24.9996"))
         balance = newbalance
 
         # Reset to a higher relay fee so that we abandon a transaction
@@ -194,7 +200,8 @@ class AbandonConflictTest(BitcoinTestFramework):
         connect_nodes(self.nodes[0], self.nodes[1])
         sync_blocks(self.nodes)
 
-        # Verify that B and C's 10 BCH outputs are available for spending again because AB1 is now conflicted
+        # Verify that B and C's 10 BCH outputs are available for spending again
+        # because AB1 is now conflicted
         newbalance = self.nodes[0].getbalance()
         assert_equal(newbalance, balance + Decimal("20"))
         balance = newbalance
@@ -204,7 +211,7 @@ class AbandonConflictTest(BitcoinTestFramework):
         # Don't think C's should either
         self.nodes[0].invalidateblock(self.nodes[0].getbestblockhash())
         newbalance = self.nodes[0].getbalance()
-        #assert_equal(newbalance, balance - Decimal("10"))
+        # assert_equal(newbalance, balance - Decimal("10"))
         self.log.info(
             "If balance has not declined after invalidateblock then out of mempool wallet tx which is no longer")
         self.log.info(

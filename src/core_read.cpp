@@ -7,6 +7,7 @@
 #include <primitives/block.h>
 #include <primitives/transaction.h>
 #include <script/script.h>
+#include <script/sign.h>
 #include <serialize.h>
 #include <streams.h>
 #include <util/strencodings.h>
@@ -14,10 +15,10 @@
 #include <version.h>
 
 #include <boost/algorithm/string/classification.hpp>
-#include <boost/algorithm/string/predicate.hpp>
 #include <boost/algorithm/string/replace.hpp>
 #include <boost/algorithm/string/split.hpp>
 
+#include <algorithm>
 #include <univalue.h>
 
 CScript ParseScript(const std::string &s) {
@@ -68,10 +69,9 @@ CScript ParseScript(const std::string &s) {
         next_push_size = 0;
 
         // Decimal numbers
-        if (all(w, boost::algorithm::is_digit()) ||
-            (boost::algorithm::starts_with(w, "-") &&
-             all(std::string(w.begin() + 1, w.end()),
-                 boost::algorithm::is_digit()))) {
+        if (std::all_of(w.begin(), w.end(), ::IsDigit) ||
+            (w.front() == '-' && w.size() > 1 &&
+             std::all_of(w.begin() + 1, w.end(), ::IsDigit))) {
             // Number
             int64_t n = atoi64(w);
             result << n;
@@ -79,8 +79,7 @@ CScript ParseScript(const std::string &s) {
         }
 
         // Hex Data
-        if (boost::algorithm::starts_with(w, "0x") &&
-            (w.begin() + 2 != w.end())) {
+        if (w.substr(0, 2) == "0x" && w.size() > 2) {
             if (!IsHex(std::string(w.begin() + 2, w.end()))) {
                 // Should only arrive here for improperly formatted hex values
                 throw std::runtime_error("Hex numbers expected to be formatted "
@@ -96,8 +95,7 @@ CScript ParseScript(const std::string &s) {
             goto next;
         }
 
-        if (w.size() >= 2 && boost::algorithm::starts_with(w, "'") &&
-            boost::algorithm::ends_with(w, "'")) {
+        if (w.size() >= 2 && w.front() == '\'' && w.back() == '\'') {
             // Single-quoted string, pushed as data. NOTE: this is poor-man's
             // parsing, spaces/tabs/newlines in single-quoted strings won't
             // work.
@@ -179,29 +177,6 @@ CScript ParseScript(const std::string &s) {
     return result;
 }
 
-// Check that all of the input and output scripts of a transaction contains
-// valid opcodes
-bool CheckTxScriptsSanity(const CMutableTransaction &tx) {
-    // Check input scripts for non-coinbase txs
-    if (!CTransaction(tx).IsCoinBase()) {
-        for (const auto &i : tx.vin) {
-            if (!i.scriptSig.HasValidOps() ||
-                i.scriptSig.size() > MAX_SCRIPT_SIZE) {
-                return false;
-            }
-        }
-    }
-    // Check output scripts
-    for (const auto &o : tx.vout) {
-        if (!o.scriptPubKey.HasValidOps() ||
-            o.scriptPubKey.size() > MAX_SCRIPT_SIZE) {
-            return false;
-        }
-    }
-
-    return true;
-}
-
 bool DecodeHexTx(CMutableTransaction &tx, const std::string &strHexTx) {
     if (!IsHex(strHexTx)) {
         return false;
@@ -212,7 +187,7 @@ bool DecodeHexTx(CMutableTransaction &tx, const std::string &strHexTx) {
     CDataStream ssData(txData, SER_NETWORK, PROTOCOL_VERSION);
     try {
         ssData >> tx;
-        if (ssData.eof() && CheckTxScriptsSanity(tx)) {
+        if (ssData.eof()) {
             return true;
         }
     } catch (const std::exception &e) {
@@ -253,16 +228,30 @@ bool DecodeHexBlk(CBlock &block, const std::string &strHexBlk) {
     return true;
 }
 
-uint256 ParseHashStr(const std::string &strHex, const std::string &strName) {
-    if (!IsHex(strHex)) {
-        // Note: IsHex("") is false
-        throw std::runtime_error(
-            strName + " must be hexadecimal string (not '" + strHex + "')");
+bool DecodePSBT(PartiallySignedTransaction &psbt, const std::string &base64_tx,
+                std::string &error) {
+    std::vector<uint8_t> tx_data = DecodeBase64(base64_tx.c_str());
+    CDataStream ss_data(tx_data, SER_NETWORK, PROTOCOL_VERSION);
+    try {
+        ss_data >> psbt;
+        if (!ss_data.empty()) {
+            error = "extra data after PSBT";
+            return false;
+        }
+    } catch (const std::exception &e) {
+        error = e.what();
+        return false;
+    }
+    return true;
+}
+
+bool ParseHashStr(const std::string &strHex, uint256 &result) {
+    if ((strHex.size() != 64) || !IsHex(strHex)) {
+        return false;
     }
 
-    uint256 result;
     result.SetHex(strHex);
-    return result;
+    return true;
 }
 
 std::vector<uint8_t> ParseHexUV(const UniValue &v, const std::string &strName) {
@@ -277,4 +266,36 @@ std::vector<uint8_t> ParseHexUV(const UniValue &v, const std::string &strName) {
     }
 
     return ParseHex(strHex);
+}
+
+SigHashType ParseSighashString(const UniValue &sighash) {
+    SigHashType sigHashType = SigHashType().withForkId();
+    if (!sighash.isNull()) {
+        static std::map<std::string, int> map_sighash_values = {
+            {"ALL", SIGHASH_ALL},
+            {"ALL|ANYONECANPAY", SIGHASH_ALL | SIGHASH_ANYONECANPAY},
+            {"ALL|FORKID", SIGHASH_ALL | SIGHASH_FORKID},
+            {"ALL|FORKID|ANYONECANPAY",
+             SIGHASH_ALL | SIGHASH_FORKID | SIGHASH_ANYONECANPAY},
+            {"NONE", SIGHASH_NONE},
+            {"NONE|ANYONECANPAY", SIGHASH_NONE | SIGHASH_ANYONECANPAY},
+            {"NONE|FORKID", SIGHASH_NONE | SIGHASH_FORKID},
+            {"NONE|FORKID|ANYONECANPAY",
+             SIGHASH_NONE | SIGHASH_FORKID | SIGHASH_ANYONECANPAY},
+            {"SINGLE", SIGHASH_SINGLE},
+            {"SINGLE|ANYONECANPAY", SIGHASH_SINGLE | SIGHASH_ANYONECANPAY},
+            {"SINGLE|FORKID", SIGHASH_SINGLE | SIGHASH_FORKID},
+            {"SINGLE|FORKID|ANYONECANPAY",
+             SIGHASH_SINGLE | SIGHASH_FORKID | SIGHASH_ANYONECANPAY},
+        };
+        std::string strHashType = sighash.get_str();
+        const auto &it = map_sighash_values.find(strHashType);
+        if (it != map_sighash_values.end()) {
+            sigHashType = SigHashType(it->second);
+        } else {
+            throw std::runtime_error(strHashType +
+                                     " is not a valid sighash parameter.");
+        }
+    }
+    return sigHashType;
 }

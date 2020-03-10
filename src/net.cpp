@@ -93,8 +93,6 @@ CCriticalSection cs_mapLocalHost;
 std::map<CNetAddr, LocalServiceInfo> mapLocalHost GUARDED_BY(cs_mapLocalHost);
 static bool vfLimited[NET_MAX] GUARDED_BY(cs_mapLocalHost) = {};
 
-limitedmap<uint256, int64_t> mapAlreadyAskedFor(MAX_INV_SZ);
-
 void CConnman::AddOneShot(const std::string &strDest) {
     LOCK(cs_vOneShots);
     vOneShots.push_back(strDest);
@@ -128,7 +126,7 @@ bool GetLocal(CService &addr, const CNetAddr *paddrPeer) {
     return nBestScore >= 0;
 }
 
-//! Convert the pnSeeds6 array into usable address objects.
+//! Convert the pnSeed6 array into usable address objects.
 static std::vector<CAddress>
 convertSeed6(const std::vector<SeedSpec6> &vSeedsIn) {
     // It'll only connect to one or two seed nodes because once it connects,
@@ -175,7 +173,7 @@ static int GetnScore(const CService &addr) {
 bool IsPeerAddrLocalGood(CNode *pnode) {
     CService addrLocal = pnode->GetAddrLocal();
     return fDiscover && pnode->addr.IsRoutable() && addrLocal.IsRoutable() &&
-           !IsLimited(addrLocal.GetNetwork());
+           IsReachable(addrLocal.GetNetwork());
 }
 
 // Pushes our own address to a peer.
@@ -217,7 +215,7 @@ bool AddLocal(const CService &addr, int nScore) {
         return false;
     }
 
-    if (IsLimited(addr)) {
+    if (!IsReachable(addr)) {
         return false;
     }
 
@@ -246,24 +244,21 @@ void RemoveLocal(const CService &addr) {
     mapLocalHost.erase(addr);
 }
 
-/**
- * Make a particular network entirely off-limits (no automatic connects to it).
- */
-void SetLimited(enum Network net, bool fLimited) {
+void SetReachable(enum Network net, bool reachable) {
     if (net == NET_UNROUTABLE || net == NET_INTERNAL) {
         return;
     }
     LOCK(cs_mapLocalHost);
-    vfLimited[net] = fLimited;
+    vfLimited[net] = !reachable;
 }
 
-bool IsLimited(enum Network net) {
+bool IsReachable(enum Network net) {
     LOCK(cs_mapLocalHost);
-    return vfLimited[net];
+    return !vfLimited[net];
 }
 
-bool IsLimited(const CNetAddr &addr) {
-    return IsLimited(addr.GetNetwork());
+bool IsReachable(const CNetAddr &addr) {
+    return IsReachable(addr.GetNetwork());
 }
 
 /** vote for a local address */
@@ -280,18 +275,6 @@ bool SeenLocal(const CService &addr) {
 bool IsLocal(const CService &addr) {
     LOCK(cs_mapLocalHost);
     return mapLocalHost.count(addr) > 0;
-}
-
-/** check whether a given network is one we can probably connect to */
-bool IsReachable(enum Network net) {
-    LOCK(cs_mapLocalHost);
-    return !vfLimited[net];
-}
-
-/** check whether a given address is in a network we can probably connect to */
-bool IsReachable(const CNetAddr &addr) {
-    enum Network net = addr.GetNetwork();
-    return IsReachable(net);
 }
 
 CNode *CConnman::FindNode(const CNetAddr &ip) {
@@ -338,8 +321,9 @@ bool CConnman::CheckIncomingNonce(uint64_t nonce) {
     LOCK(cs_vNodes);
     for (const CNode *pnode : vNodes) {
         if (!pnode->fSuccessfullyConnected && !pnode->fInbound &&
-            pnode->GetLocalNonce() == nonce)
+            pnode->GetLocalNonce() == nonce) {
             return false;
+        }
     }
     return true;
 }
@@ -808,6 +792,7 @@ struct NodeEvictionCandidate {
     bool fBloomFilter;
     CAddress addr;
     uint64_t nKeyedNetGroup;
+    bool prefer_evict;
 };
 
 static bool ReverseCompareNodeMinPingTime(const NodeEvictionCandidate &a,
@@ -897,7 +882,8 @@ bool CConnman::AttemptToEvictConnection() {
                 node->fRelayTxes,
                 node->pfilter != nullptr,
                 node->addr,
-                node->nKeyedNetGroup};
+                node->nKeyedNetGroup,
+                node->m_prefer_evict};
             vEvictionCandidates.push_back(candidate);
         }
     }
@@ -925,6 +911,20 @@ bool CConnman::AttemptToEvictConnection() {
 
     if (vEvictionCandidates.empty()) {
         return false;
+    }
+
+    // If any remaining peers are preferred for eviction consider only them.
+    // This happens after the other preferences since if a peer is really the
+    // best by other criteria (esp relaying blocks)
+    // then we probably don't want to evict it no matter what.
+    if (std::any_of(
+            vEvictionCandidates.begin(), vEvictionCandidates.end(),
+            [](NodeEvictionCandidate const &n) { return n.prefer_evict; })) {
+        vEvictionCandidates.erase(
+            std::remove_if(
+                vEvictionCandidates.begin(), vEvictionCandidates.end(),
+                [](NodeEvictionCandidate const &n) { return !n.prefer_evict; }),
+            vEvictionCandidates.end());
     }
 
     // Identify the network group with the most connections and youngest member.
@@ -1015,7 +1015,12 @@ void CConnman::AcceptConnection(const ListenSocket &hListenSocket) {
     // sockets on all platforms.  Set it again here just to be sure.
     SetSocketNoDelay(hSocket);
 
-    if (m_banman && m_banman->IsBanned(addr) && !whitelisted) {
+    int bannedlevel = m_banman ? m_banman->IsBannedLevel(addr) : 0;
+
+    // Don't accept connections from banned peers, but if our inbound slots
+    // aren't almost full, accept if the only banning reason was an automatic
+    // misbehavior ban.
+    if (!whitelisted && bannedlevel > ((nInbound + 1 < nMaxInbound) ? 1 : 0)) {
         LogPrint(BCLog::NET, "connection from %s dropped (banned)\n",
                  addr.ToString());
         CloseSocket(hSocket);
@@ -1043,6 +1048,8 @@ void CConnman::AcceptConnection(const ListenSocket &hListenSocket) {
                   CalculateKeyedNetGroup(addr), nonce, addr_bind, "", true);
     pnode->AddRef();
     pnode->fWhitelisted = whitelisted;
+
+    pnode->m_prefer_evict = bannedlevel > 0;
     m_msgproc->InitializeNode(*config, pnode);
 
     LogPrint(BCLog::NET, "connection from %s accepted\n", addr.ToString());
@@ -1697,9 +1704,7 @@ void CConnman::ThreadOpenConnections(const std::vector<std::string> connect) {
         //
         CAddress addrConnect;
 
-        // Only connect out to one peer per network group (/16 for IPv4). Do
-        // this here so we don't have to critsect vNodes inside mapAddresses
-        // critsect.
+        // Only connect out to one peer per network group (/16 for IPv4).
         int nOutbound = 0;
         std::set<std::vector<uint8_t>> setConnected;
         {
@@ -1772,7 +1777,7 @@ void CConnman::ThreadOpenConnections(const std::vector<std::string> connect) {
                 break;
             }
 
-            if (IsLimited(addr)) {
+            if (!IsReachable(addr)) {
                 continue;
             }
 
@@ -1804,7 +1809,6 @@ void CConnman::ThreadOpenConnections(const std::vector<std::string> connect) {
         }
 
         if (addrConnect.IsValid()) {
-
             if (fFeeler) {
                 // Add small amount of random noise before connection to avoid
                 // synchronization.
@@ -2178,7 +2182,7 @@ NodeId CConnman::GetNewNodeId() {
 }
 
 bool CConnman::Bind(const CService &addr, unsigned int flags) {
-    if (!(flags & BF_EXPLICIT) && IsLimited(addr)) {
+    if (!(flags & BF_EXPLICIT) && !IsReachable(addr)) {
         return false;
     }
     std::string strError;
@@ -2680,7 +2684,7 @@ CNode::CNode(NodeId idIn, ServiceFlags nLocalServicesIn,
     hSocket = hSocketIn;
     addrName = addrNameIn == "" ? addr.ToStringIPPort() : addrNameIn;
     strSubVer = "";
-    hashContinue = uint256();
+    hashContinue = BlockHash();
     filterInventoryKnown.reset();
     pfilter = std::make_unique<CBloomFilter>();
 
@@ -2698,48 +2702,6 @@ CNode::CNode(NodeId idIn, ServiceFlags nLocalServicesIn,
 
 CNode::~CNode() {
     CloseSocket(hSocket);
-}
-
-void CNode::AskFor(const CInv &inv) {
-    if (mapAskFor.size() > MAPASKFOR_MAX_SZ ||
-        setAskFor.size() > SETASKFOR_MAX_SZ) {
-        return;
-    }
-
-    // a peer may not have multiple non-responded queue positions for a single
-    // inv item.
-    if (!setAskFor.insert(inv.hash).second) {
-        return;
-    }
-
-    // We're using mapAskFor as a priority queue, the key is the earliest time
-    // the request can be sent.
-    int64_t nRequestTime;
-    limitedmap<uint256, int64_t>::const_iterator it =
-        mapAlreadyAskedFor.find(inv.hash);
-    if (it != mapAlreadyAskedFor.end()) {
-        nRequestTime = it->second;
-    } else {
-        nRequestTime = 0;
-    }
-    LogPrint(BCLog::NET, "askfor %s  %d (%s) peer=%d\n", inv.ToString(),
-             nRequestTime, FormatISO8601DateTime(nRequestTime / 1000000), id);
-
-    // Make sure not to reuse time indexes to keep things in the same order
-    int64_t nNow = GetTimeMicros() - 1000000;
-    static int64_t nLastTime;
-    ++nLastTime;
-    nNow = std::max(nNow, nLastTime);
-    nLastTime = nNow;
-
-    // Each retry is 2 minutes after the last
-    nRequestTime = std::max(nRequestTime + 2 * 60 * 1000000, nNow);
-    if (it != mapAlreadyAskedFor.end()) {
-        mapAlreadyAskedFor.update(it, nRequestTime);
-    } else {
-        mapAlreadyAskedFor.insert(std::make_pair(inv.hash, nRequestTime));
-    }
-    mapAskFor.insert(std::make_pair(nRequestTime, inv));
 }
 
 bool CConnman::NodeFullyConnected(const CNode *pnode) {
@@ -2800,11 +2762,24 @@ bool CConnman::ForNode(NodeId id, std::function<bool(CNode *pnode)> func) {
     return found != nullptr && NodeFullyConnected(found) && func(found);
 }
 
-int64_t PoissonNextSend(int64_t nNow, int average_interval_seconds) {
-    return nNow + int64_t(log1p(GetRand(1ULL << 48) *
-                                -0.0000000000000035527136788 /* -1/2^48 */) *
-                              average_interval_seconds * -1000000.0 +
-                          0.5);
+int64_t CConnman::PoissonNextSendInbound(int64_t now,
+                                         int average_interval_seconds) {
+    if (m_next_send_inv_to_incoming < now) {
+        // If this function were called from multiple threads simultaneously
+        // it would be possible that both update the next send variable, and
+        // return a different result to their caller. This is not possible in
+        // practice as only the net processing thread invokes this function.
+        m_next_send_inv_to_incoming =
+            PoissonNextSend(now, average_interval_seconds);
+    }
+    return m_next_send_inv_to_incoming;
+}
+
+int64_t PoissonNextSend(int64_t now, int average_interval_seconds) {
+    return now + int64_t(log1p(GetRand(1ULL << 48) *
+                               -0.0000000000000035527136788 /* -1/2^48 */) *
+                             average_interval_seconds * -1000000.0 +
+                         0.5);
 }
 
 CSipHasher CConnman::GetDeterministicRandomizer(uint64_t id) const {

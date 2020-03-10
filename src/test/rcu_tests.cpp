@@ -1,4 +1,4 @@
-// Copyright (c) 2018 The Bitcoin developers
+// Copyright (c) 2018-2019 The Bitcoin developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -131,6 +131,9 @@ BOOST_AUTO_TEST_CASE(synchronize_test) {
         tlock.join();
         tsync.join();
     }
+
+    // Needed to suppress "Test case [...] did not check any assertions"
+    BOOST_CHECK(true);
 }
 
 BOOST_AUTO_TEST_CASE(cleanup_test) {

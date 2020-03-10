@@ -36,7 +36,8 @@ def process_constants(indir, file_name):
 
 def main():
     if len(sys.argv) != 2:
-        print('Usage: {} <dir_with_chainparams_txt>'.format(sys.argv[0]), file=sys.stderr)
+        print('Usage: {} <dir_with_chainparams_txt>'.format(
+            sys.argv[0]), file=sys.stderr)
         sys.exit(1)
 
     indir = sys.argv[1]
@@ -49,13 +50,14 @@ def main():
  * @{} by contrib/devtools/chainparams/generate_chainparams_constants.py
  */
 
+#include <primitives/blockhash.h>
 #include <uint256.h>
 
 namespace ChainParamsConstants {{
-    const uint256 MAINNET_DEFAULT_ASSUME_VALID = uint256S("{}");
+    const BlockHash MAINNET_DEFAULT_ASSUME_VALID = BlockHash::fromHex("{}");
     const uint256 MAINNET_MINIMUM_CHAIN_WORK = uint256S("{}");
 
-    const uint256 TESTNET_DEFAULT_ASSUME_VALID = uint256S("{}");
+    const BlockHash TESTNET_DEFAULT_ASSUME_VALID = BlockHash::fromHex("{}");
     const uint256 TESTNET_MINIMUM_CHAIN_WORK = uint256S("{}");
 }} // namespace ChainParamsConstants
 

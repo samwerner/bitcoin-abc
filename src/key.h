@@ -113,7 +113,7 @@ public:
      * The test_case parameter tweaks the deterministic nonce.
      */
     bool SignECDSA(const uint256 &hash, std::vector<uint8_t> &vchSig,
-                   uint32_t test_case = 0) const;
+                   bool grind = true, uint32_t test_case = 0) const;
 
     /**
      * Create a Schnorr signature.
@@ -170,7 +170,7 @@ struct CExtKey {
     void Decode(const uint8_t code[BIP32_EXTKEY_SIZE]);
     bool Derive(CExtKey &out, unsigned int nChild) const;
     CExtPubKey Neuter() const;
-    void SetMaster(const uint8_t *seed, unsigned int nSeedLen);
+    void SetSeed(const uint8_t *seed, unsigned int nSeedLen);
     template <typename Stream> void Serialize(Stream &s) const {
         unsigned int len = BIP32_EXTKEY_SIZE;
         ::WriteCompactSize(s, len);

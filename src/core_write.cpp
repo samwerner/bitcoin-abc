@@ -88,6 +88,14 @@ const std::map<uint8_t, std::string> mapSigHashTypes = {
      "SINGLE|FORKID|ANYONECANPAY"},
 };
 
+std::string SighashToStr(uint8_t sighash_type) {
+    const auto &it = mapSigHashTypes.find(sighash_type);
+    if (it == mapSigHashTypes.end()) {
+        return "";
+    }
+    return it->second;
+}
+
 /**
  * Create the assembly string representation of a CScript object.
  * @param[in] script    CScript object to convert into the asm string
@@ -168,6 +176,20 @@ std::string EncodeHexTx(const CTransaction &tx, const int serializeFlags) {
     return HexStr(ssTx.begin(), ssTx.end());
 }
 
+void ScriptToUniv(const CScript &script, UniValue &out, bool include_address) {
+    out.pushKV("asm", ScriptToAsmStr(script));
+    out.pushKV("hex", HexStr(script.begin(), script.end()));
+
+    std::vector<std::vector<uint8_t>> solns;
+    txnouttype type = Solver(script, solns);
+    out.pushKV("type", GetTxnOutputType(type));
+
+    CTxDestination address;
+    if (include_address && ExtractDestination(script, address)) {
+        out.pushKV("address", EncodeDestination(address, GetConfig()));
+    }
+}
+
 void ScriptPubKeyToUniv(const CScript &scriptPubKey, UniValue &out,
                         bool fIncludeHex) {
     txnouttype type;
@@ -199,8 +221,7 @@ void TxToUniv(const CTransaction &tx, const uint256 &hashBlock, UniValue &entry,
     entry.pushKV("txid", tx.GetId().GetHex());
     entry.pushKV("hash", tx.GetHash().GetHex());
     entry.pushKV("version", tx.nVersion);
-    entry.pushKV("size",
-                 (int)::GetSerializeSize(tx, SER_NETWORK, PROTOCOL_VERSION));
+    entry.pushKV("size", (int)::GetSerializeSize(tx, PROTOCOL_VERSION));
     entry.pushKV("locktime", (int64_t)tx.nLockTime);
 
     UniValue vin(UniValue::VARR);

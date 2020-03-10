@@ -5,13 +5,17 @@
 """Test the parckblock and unparkblock RPC calls."""
 
 from test_framework.test_framework import BitcoinTestFramework
-from test_framework.util import assert_equal, wait_until
+from test_framework.util import assert_equal, connect_nodes_bi, wait_until
 
 
 class ParkedChainTest(BitcoinTestFramework):
     def set_test_params(self):
         self.num_nodes = 2
-        self.extra_args = [["-noparkdeepreorg"], ["-maxreorgdepth=-1"]]
+        self.extra_args = [["-noparkdeepreorg",
+                            "-noautomaticunparking"], ["-maxreorgdepth=-1"]]
+
+    def skip_test_if_missing_module(self):
+        self.skip_if_no_wallet()
 
     # There should only be one chaintip, which is expected_tip
     def only_valid_tip(self, expected_tip, other_tip_status=None):
@@ -46,9 +50,9 @@ class ParkedChainTest(BitcoinTestFramework):
         wait_for_tip(parking_node, parked_tip)
 
         # Let's park the chain.
-        assert(parked_tip != tip)
-        assert(block_to_park != tip)
-        assert(block_to_park != parked_tip)
+        assert parked_tip != tip
+        assert block_to_park != tip
+        assert block_to_park != parked_tip
         node.parkblock(block_to_park)
         assert_equal(node.getbestblockhash(), tip)
 
@@ -156,7 +160,7 @@ class ParkedChainTest(BitcoinTestFramework):
             def check_block():
                 for tip in parking_node.getchaintips():
                     if tip["hash"] == block:
-                        assert(tip["status"] != "active")
+                        assert tip["status"] != "active"
                         return tip["status"] == "parked"
                 return False
             wait_until(check_block)
@@ -187,6 +191,50 @@ class ParkedChainTest(BitcoinTestFramework):
         check_reorg_protection(5, 5)
         check_reorg_protection(6, 6)
         check_reorg_protection(100, 100)
+
+        # try deep reorg with a log check.
+        with parking_node.assert_debug_log(["Park block"]):
+            check_reorg_protection(3, 1)
+
+        self.log.info(
+            "Accepting many blocks at once (possibly out of order) should not park if there is no reorg.")
+        # rewind one block to make a reorg that is shallow.
+        node.invalidateblock(parking_node.getbestblockhash())
+        # generate a ton of blocks at once.
+        try:
+            with parking_node.assert_debug_log(["Park block"]):
+                node.generate(20)
+                wait_until(lambda: parking_node.getbestblockhash() ==
+                           node.getbestblockhash())
+        except AssertionError as exc:
+            # good, we want an absence of "Park block" messages
+            assert "does not partially match log" in exc.args[0]
+        else:
+            raise AssertionError("Parked block when there was no deep reorg")
+
+        self.log.info("Test that unparking works when -parkdeepreorg=0")
+        # Set up parking node height = fork + 4, node height = fork + 5
+        node.invalidateblock(node.getbestblockhash())
+        parking_node.generate(3)
+        node.generate(5)
+        wait_for_parked_block(node.getbestblockhash())
+        # Restart the parking node without parkdeepreorg.
+        self.restart_node(1, ["-parkdeepreorg=0"])
+        parking_node = self.nodes[1]
+        connect_nodes_bi(node, parking_node)
+        # The other chain should still be marked 'parked'.
+        wait_for_parked_block(node.getbestblockhash())
+        # Three more blocks is not enough to unpark. Even though its PoW is
+        # larger, we are still following the delayed-unparking rules.
+        node.generate(3)
+        wait_for_parked_block(node.getbestblockhash())
+        # Final block pushes over the edge, and should unpark.
+        node.generate(1)
+        wait_until(lambda: parking_node.getbestblockhash() ==
+                   node.getbestblockhash(), timeout=5)
+
+        # Do not append tests after this point without restarting node again.
+        # Parking node is no longer parking.
 
 
 if __name__ == '__main__':

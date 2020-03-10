@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright (c) 2015-2016 The Bitcoin Core developers
+# Copyright (c) 2015-2019 The Bitcoin Core developers
 # Distributed under the MIT software license, see the accompanying
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
 """Test transaction signing using the signrawtransaction* RPCs."""
@@ -16,6 +16,9 @@ class SignRawTransactionsTest(BitcoinTestFramework):
         self.setup_clean_chain = True
         self.num_nodes = 2
         self.extra_args = [[], ["-wallet=w1", "-wallet=w2"]]
+
+    def skip_test_if_missing_module(self):
+        self.skip_if_no_wallet()
 
     def successful_signing_test(self):
         """Creates and signs a valid raw transaction with one input.
@@ -48,6 +51,17 @@ class SignRawTransactionsTest(BitcoinTestFramework):
 
         # 2) No script verification error occurred
         assert 'errors' not in rawTxSigned
+
+    def test_with_lock_outputs(self):
+        """Test correct error reporting when trying to sign a locked output"""
+        self.nodes[0].encryptwallet("password")
+
+        rawTx = '020000000156b958f78e3f24e0b2f4e4db1255426b0902027cb37e3ddadb52e37c3557dddb0000000000ffffffff01c0a6b929010000001600149a2ee8c77140a053f36018ac8124a6ececc1668a00000000'
+
+        assert_raises_rpc_error(-13,
+                                "Please enter the wallet passphrase with walletpassphrase first",
+                                self.nodes[0].signrawtransactionwithwallet,
+                                rawTx)
 
     def script_verification_error_test(self):
         """Creates and signs a raw transaction with valid (vin 0), invalid (vin 1) and one missing (vin 2) input script.
@@ -149,7 +163,7 @@ class SignRawTransactionsTest(BitcoinTestFramework):
             "SINGLE|FORKID",
             "ALL|FORKID|ANYONECANPAY",
             "NONE|FORKID|ANYONECANPAY",
-            "SINGLE|FORKID|ANYONECANPAY"
+            "SINGLE|FORKID|ANYONECANPAY",
         ]
         no_forkid_sighashes = [
             "ALL",
@@ -157,13 +171,13 @@ class SignRawTransactionsTest(BitcoinTestFramework):
             "SINGLE",
             "ALL|ANYONECANPAY",
             "NONE|ANYONECANPAY",
-            "SINGLE|ANYONECANPAY"
+            "SINGLE|ANYONECANPAY",
         ]
         invalid_sighashes = [
             "",
             "ALL|SINGLE|FORKID",
             str(0),
-            str(0x20)
+            str(0x20),
         ]
 
         # 1) If the sighash is valid with FORKID, the signature is complete
@@ -182,7 +196,7 @@ class SignRawTransactionsTest(BitcoinTestFramework):
 
         # 3) If the sighash is invalid the RPC throws an error
         for sighash in invalid_sighashes:
-            assert_raises_rpc_error(-8, "Invalid sighash param",
+            assert_raises_rpc_error(-1, sighash + " is not a valid sighash parameter.",
                                     self.nodes[0].signrawtransactionwithkey,
                                     rawTx, privKeys, inputs, sighash)
 
@@ -233,6 +247,7 @@ class SignRawTransactionsTest(BitcoinTestFramework):
         self.script_verification_error_test()
         self.test_sighashes()
         self.multiwallet_signing_test()
+        self.test_with_lock_outputs()
 
 
 if __name__ == '__main__':

@@ -1,6 +1,10 @@
-// Copyright (c) 2011-2016 The Bitcoin Core developers
+// Copyright (c) 2011-2019 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
+
+#if defined(HAVE_CONFIG_H)
+#include <config/bitcoin-config.h>
+#endif
 
 #include <qt/walletmodel.h>
 
@@ -29,8 +33,8 @@ WalletModel::WalletModel(std::unique_ptr<interfaces::Wallet> wallet,
                          const PlatformStyle *platformStyle,
                          OptionsModel *_optionsModel, QObject *parent)
     : QObject(parent), m_wallet(std::move(wallet)), m_node(node),
-      optionsModel(_optionsModel), addressTableModel(0),
-      transactionTableModel(0), recentRequestsTableModel(0),
+      optionsModel(_optionsModel), addressTableModel(nullptr),
+      transactionTableModel(nullptr), recentRequestsTableModel(nullptr),
       cachedEncryptionStatus(Unencrypted), cachedNumBlocks(0) {
     fHaveWatchOnly = m_wallet->haveWatchOnly();
     addressTableModel = new AddressTableModel(this);
@@ -39,7 +43,8 @@ WalletModel::WalletModel(std::unique_ptr<interfaces::Wallet> wallet,
 
     // This timer will be fired repeatedly to update the balance
     pollTimer = new QTimer(this);
-    connect(pollTimer, SIGNAL(timeout()), this, SLOT(pollBalanceChanged()));
+    connect(pollTimer, &QTimer::timeout, this,
+            &WalletModel::pollBalanceChanged);
     pollTimer->start(MODEL_UPDATE_DELAY);
 
     subscribeToCoreSignals();
@@ -129,8 +134,11 @@ WalletModel::prepareTransaction(WalletModelTransaction &transaction,
 
     // Pre-check input data for validity
     for (const SendCoinsRecipient &rcp : recipients) {
-        if (rcp.fSubtractFeeFromAmount) fSubtractFeeFromAmount = true;
+        if (rcp.fSubtractFeeFromAmount) {
+            fSubtractFeeFromAmount = true;
+        }
 
+#ifdef ENABLE_BIP70
         // PaymentRequest...
         if (rcp.paymentRequest.IsInitialized()) {
             Amount subtotal = Amount::zero();
@@ -156,8 +164,12 @@ WalletModel::prepareTransaction(WalletModelTransaction &transaction,
                 return InvalidAmount;
             }
             total += subtotal;
-        } else {
-            // User-entered bitcoin address / amount:
+        }
+
+        // User-entered bitcoin address / amount:
+        else
+#endif
+        {
             if (!validateAddress(rcp.address)) {
                 return InvalidAddress;
             }
@@ -225,6 +237,7 @@ WalletModel::sendCoins(WalletModelTransaction &transaction) {
 
     std::vector<std::pair<std::string, std::string>> vOrderForm;
     for (const SendCoinsRecipient &rcp : transaction.getRecipients()) {
+#ifdef ENABLE_BIP70
         if (rcp.paymentRequest.IsInitialized()) {
             // Make sure any payment requests involved are still valid.
             if (PaymentServer::verifyExpired(rcp.paymentRequest.getDetails())) {
@@ -235,17 +248,21 @@ WalletModel::sendCoins(WalletModelTransaction &transaction) {
             std::string value;
             rcp.paymentRequest.SerializeToString(&value);
             vOrderForm.emplace_back("PaymentRequest", std::move(value));
-        } else if (!rcp.message.isEmpty()) {
-            // Message from normal bitcoincash:URI
-            // (bitcoincash:123...?message=example)
-            vOrderForm.emplace_back("Message", rcp.message.toStdString());
+        } else
+#endif
+        {
+            if (!rcp.message.isEmpty()) {
+                // Message from normal bitcoincash:URI
+                // (bitcoincash:123...?message=example)
+                vOrderForm.emplace_back("Message", rcp.message.toStdString());
+            }
         }
     }
 
     auto &newTx = transaction.getWtx();
     std::string rejectReason;
     if (!newTx->commit({} /* mapValue */, std::move(vOrderForm),
-                       {} /* fromAccount */, rejectReason)) {
+                       rejectReason)) {
         return SendCoinsReturn(TransactionCommitFailed,
                                QString::fromStdString(rejectReason));
     }
@@ -258,7 +275,10 @@ WalletModel::sendCoins(WalletModelTransaction &transaction) {
     // emit coinsSent signal for each recipient
     for (const SendCoinsRecipient &rcp : transaction.getRecipients()) {
         // Don't touch the address book when we have a payment request
-        if (!rcp.paymentRequest.IsInitialized()) {
+#ifdef ENABLE_BIP70
+        if (!rcp.paymentRequest.IsInitialized())
+#endif
+        {
             std::string strAddress = rcp.address.toStdString();
             CTxDestination dest =
                 DecodeDestination(strAddress, getChainParams());
@@ -340,7 +360,7 @@ bool WalletModel::changePassphrase(const SecureString &oldPass,
 // Handlers for core signals
 static void NotifyUnload(WalletModel *walletModel) {
     qDebug() << "NotifyUnload";
-    QMetaObject::invokeMethod(walletModel, "unload", Qt::QueuedConnection);
+    QMetaObject::invokeMethod(walletModel, "unload");
 }
 
 static void NotifyKeyStoreStatusChanged(WalletModel *walletmodel) {
@@ -392,6 +412,10 @@ static void NotifyWatchonlyChanged(WalletModel *walletmodel,
                               Q_ARG(bool, fHaveWatchonly));
 }
 
+static void NotifyCanGetAddressesChanged(WalletModel *walletmodel) {
+    QMetaObject::invokeMethod(walletmodel, "canGetAddressesChanged");
+}
+
 void WalletModel::subscribeToCoreSignals() {
     // Connect signals to wallet
     m_handler_unload = m_wallet->handleUnload(std::bind(&NotifyUnload, this));
@@ -408,6 +432,8 @@ void WalletModel::subscribeToCoreSignals() {
         ShowProgress, this, std::placeholders::_1, std::placeholders::_2));
     m_handler_watch_only_changed = m_wallet->handleWatchOnlyChanged(
         std::bind(NotifyWatchonlyChanged, this, std::placeholders::_1));
+    m_handler_can_get_addrs_changed = m_wallet->handleCanGetAddressesChanged(
+        std::bind(NotifyCanGetAddressesChanged, this));
 }
 
 void WalletModel::unsubscribeFromCoreSignals() {
@@ -418,6 +444,7 @@ void WalletModel::unsubscribeFromCoreSignals() {
     m_handler_transaction_changed->disconnect();
     m_handler_show_progress->disconnect();
     m_handler_watch_only_changed->disconnect();
+    m_handler_can_get_addrs_changed->disconnect();
 }
 
 // WalletModel::UnlockContext implementation
@@ -474,8 +501,21 @@ bool WalletModel::isWalletEnabled() {
     return !gArgs.GetBoolArg("-disablewallet", DEFAULT_DISABLE_WALLET);
 }
 
+bool WalletModel::privateKeysDisabled() const {
+    return m_wallet->IsWalletFlagSet(WALLET_FLAG_DISABLE_PRIVATE_KEYS);
+}
+
+bool WalletModel::canGetAddresses() const {
+    return m_wallet->canGetAddresses();
+}
+
 QString WalletModel::getWalletName() const {
     return QString::fromStdString(m_wallet->getWalletName());
+}
+
+QString WalletModel::getDisplayName() const {
+    const QString name = getWalletName();
+    return name.isEmpty() ? "[" + tr("default wallet") + "]" : name;
 }
 
 bool WalletModel::isMultiwallet() {

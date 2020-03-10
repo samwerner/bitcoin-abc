@@ -18,11 +18,20 @@
 
 #include <atomic>
 #include <map>
+#include <memory>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 static const unsigned int DEFAULT_WALLET_DBLOGSIZE = 100;
 static const bool DEFAULT_WALLET_PRIVDB = true;
+
+struct WalletDatabaseFileId {
+    u_int8_t value[DB_FILE_ID_LEN];
+    bool operator==(const WalletDatabaseFileId &rhs) const;
+};
+
+class BerkeleyDatabase;
 
 class BerkeleyEnvironment {
 private:
@@ -36,15 +45,21 @@ private:
 public:
     std::unique_ptr<DbEnv> dbenv;
     std::map<std::string, int> mapFileUseCount;
-    std::map<std::string, Db *> mapDb;
+    std::map<std::string, std::reference_wrapper<BerkeleyDatabase>> m_databases;
+    std::unordered_map<std::string, WalletDatabaseFileId> m_fileids;
+    std::condition_variable_any m_db_in_use;
 
     BerkeleyEnvironment(const fs::path &env_directory);
+    BerkeleyEnvironment();
     ~BerkeleyEnvironment();
     void Reset();
 
     void MakeMock();
     bool IsMock() const { return fMockDb; }
     bool IsInitialized() const { return fDbEnvInit; }
+    bool IsDatabaseLoaded(const std::string &db_filename) const {
+        return m_databases.find(db_filename) != m_databases.end();
+    }
     fs::path Directory() const { return strPath; }
 
     /**
@@ -78,6 +93,7 @@ public:
     void CheckpointLSN(const std::string &strFile);
 
     void CloseDb(const std::string &strFile);
+    void ReloadDbEnv();
 
     DbTxn *TxnBegin(int flags = DB_TXN_WRITE_NOSYNC) {
         DbTxn *ptxn = nullptr;
@@ -87,9 +103,12 @@ public:
     }
 };
 
+/** Return whether a wallet database is currently loaded. */
+bool IsWalletLoaded(const fs::path &wallet_path);
+
 /** Get BerkeleyEnvironment and database filename given a wallet path. */
-BerkeleyEnvironment *GetWalletEnv(const fs::path &wallet_path,
-                                  std::string &database_filename);
+std::shared_ptr<BerkeleyEnvironment>
+GetWalletEnv(const fs::path &wallet_path, std::string &database_filename);
 
 /**
  * An instance of this class represents one database.
@@ -105,20 +124,28 @@ public:
           nLastWalletUpdate(0), env(nullptr) {}
 
     /** Create DB handle to real database */
-    BerkeleyDatabase(const fs::path &wallet_path, bool mock = false)
+    BerkeleyDatabase(std::shared_ptr<BerkeleyEnvironment> envIn,
+                     std::string filename)
         : nUpdateCounter(0), nLastSeen(0), nLastFlushed(0),
-          nLastWalletUpdate(0) {
-        env = GetWalletEnv(wallet_path, strFile);
-        if (mock) {
-            env->Close();
-            env->Reset();
-            env->MakeMock();
+          nLastWalletUpdate(0), env(std::move(envIn)),
+          strFile(std::move(filename)) {
+        auto inserted =
+            this->env->m_databases.emplace(strFile, std::ref(*this));
+        assert(inserted.second);
+    }
+
+    ~BerkeleyDatabase() {
+        if (env) {
+            size_t erased = env->m_databases.erase(strFile);
+            assert(erased == 1);
         }
     }
 
     /** Return object for accessing database at specified path. */
     static std::unique_ptr<BerkeleyDatabase> Create(const fs::path &path) {
-        return std::make_unique<BerkeleyDatabase>(path);
+        std::string filename;
+        return std::make_unique<BerkeleyDatabase>(GetWalletEnv(path, filename),
+                                                  std::move(filename));
     }
 
     /**
@@ -133,7 +160,8 @@ public:
      * Return object for accessing temporary in-memory database.
      */
     static std::unique_ptr<BerkeleyDatabase> CreateMock() {
-        return std::make_unique<BerkeleyDatabase>("", true /* mock */);
+        return std::make_unique<BerkeleyDatabase>(
+            std::make_shared<BerkeleyEnvironment>(), "");
     }
 
     /**
@@ -154,14 +182,31 @@ public:
 
     void IncrementUpdateCounter();
 
+    void ReloadDbEnv();
+
     std::atomic<unsigned int> nUpdateCounter;
     unsigned int nLastSeen;
     unsigned int nLastFlushed;
     int64_t nLastWalletUpdate;
 
+    /**
+     * Pointer to shared database environment.
+     *
+     * Normally there is only one BerkeleyDatabase object per
+     * BerkeleyEnvivonment, but in the special, backwards compatible case where
+     * multiple wallet BDB data files are loaded from the same directory, this
+     * will point to a shared instance that gets freed when the last data file
+     * is closed.
+     */
+    std::shared_ptr<BerkeleyEnvironment> env;
+
+    /**
+     * Database pointer. This is initialized lazily and reset during flushes,
+     * so it can be null.
+     */
+    std::unique_ptr<Db> m_db;
+
 private:
-    /** BerkeleyDB specific */
-    BerkeleyEnvironment *env;
     std::string strFile;
 
     /**

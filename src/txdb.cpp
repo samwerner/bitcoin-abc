@@ -1,5 +1,5 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
-// Copyright (c) 2009-2016 The Bitcoin Core developers
+// Copyright (c) 2009-2018 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -8,11 +8,10 @@
 #include <chain.h>
 #include <chainparams.h>
 #include <hash.h>
-#include <init.h>
 #include <pow.h>
 #include <random.h>
+#include <shutdown.h>
 #include <ui_interface.h>
-#include <uint256.h>
 #include <util/system.h>
 
 #include <boost/thread.hpp> // boost::this_thread::interruption_point() (mingw)
@@ -66,21 +65,23 @@ bool CCoinsViewDB::HaveCoin(const COutPoint &outpoint) const {
     return db.Exists(CoinEntry(&outpoint));
 }
 
-uint256 CCoinsViewDB::GetBestBlock() const {
-    uint256 hashBestChain;
-    if (!db.Read(DB_BEST_BLOCK, hashBestChain)) return uint256();
+BlockHash CCoinsViewDB::GetBestBlock() const {
+    BlockHash hashBestChain;
+    if (!db.Read(DB_BEST_BLOCK, hashBestChain)) {
+        return BlockHash();
+    }
     return hashBestChain;
 }
 
-std::vector<uint256> CCoinsViewDB::GetHeadBlocks() const {
-    std::vector<uint256> vhashHeadBlocks;
+std::vector<BlockHash> CCoinsViewDB::GetHeadBlocks() const {
+    std::vector<BlockHash> vhashHeadBlocks;
     if (!db.Read(DB_HEAD_BLOCKS, vhashHeadBlocks)) {
-        return std::vector<uint256>();
+        return std::vector<BlockHash>();
     }
     return vhashHeadBlocks;
 }
 
-bool CCoinsViewDB::BatchWrite(CCoinsMap &mapCoins, const uint256 &hashBlock) {
+bool CCoinsViewDB::BatchWrite(CCoinsMap &mapCoins, const BlockHash &hashBlock) {
     CDBBatch batch(db);
     size_t count = 0;
     size_t changed = 0;
@@ -89,10 +90,10 @@ bool CCoinsViewDB::BatchWrite(CCoinsMap &mapCoins, const uint256 &hashBlock) {
     int crash_simulate = gArgs.GetArg("-dbcrashratio", 0);
     assert(!hashBlock.IsNull());
 
-    uint256 old_tip = GetBestBlock();
+    BlockHash old_tip = GetBestBlock();
     if (old_tip.IsNull()) {
         // We may be in the middle of replaying.
-        std::vector<uint256> old_heads = GetHeadBlocks();
+        std::vector<BlockHash> old_heads = GetHeadBlocks();
         if (old_heads.size() == 2) {
             assert(old_heads[0] == hashBlock);
             old_tip = old_heads[1];
@@ -104,7 +105,7 @@ bool CCoinsViewDB::BatchWrite(CCoinsMap &mapCoins, const uint256 &hashBlock) {
     // A vector is used for future extensibility, as we may want to support
     // interrupting after partial writes from multiple independent reorgs.
     batch.Erase(DB_BEST_BLOCK);
-    batch.Write(DB_HEAD_BLOCKS, std::vector<uint256>{hashBlock, old_tip});
+    batch.Write(DB_HEAD_BLOCKS, std::vector<BlockHash>{hashBlock, old_tip});
 
     for (CCoinsMap::iterator it = mapCoins.begin(); it != mapCoins.end();) {
         if (it->second.flags & CCoinsCacheEntry::DIRTY) {
@@ -163,10 +164,11 @@ bool CBlockTreeDB::ReadBlockFileInfo(int nFile, CBlockFileInfo &info) {
 }
 
 bool CBlockTreeDB::WriteReindexing(bool fReindexing) {
-    if (fReindexing)
+    if (fReindexing) {
         return Write(DB_REINDEX_FLAG, '1');
-    else
+    } else {
         return Erase(DB_REINDEX_FLAG);
+    }
 }
 
 void CBlockTreeDB::ReadReindexing(bool &fReindexing) {
@@ -256,15 +258,16 @@ bool CBlockTreeDB::WriteFlag(const std::string &name, bool fValue) {
 
 bool CBlockTreeDB::ReadFlag(const std::string &name, bool &fValue) {
     char ch;
-    if (!Read(std::make_pair(DB_FLAG, name), ch)) return false;
+    if (!Read(std::make_pair(DB_FLAG, name), ch)) {
+        return false;
+    }
     fValue = ch == '1';
     return true;
 }
 
 bool CBlockTreeDB::LoadBlockIndexGuts(
     const Consensus::Params &params,
-    std::function<CBlockIndex *(const uint256 &)> insertBlockIndex) {
-
+    std::function<CBlockIndex *(const BlockHash &)> insertBlockIndex) {
     std::unique_ptr<CDBIterator> pcursor(NewIterator());
 
     pcursor->Seek(std::make_pair(DB_BLOCK_INDEX, uint256()));

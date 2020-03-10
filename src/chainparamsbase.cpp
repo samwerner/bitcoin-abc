@@ -9,6 +9,7 @@
 #include <util/system.h>
 
 #include <cassert>
+#include <memory>
 
 const std::string CBaseChainParams::MAIN = "main";
 const std::string CBaseChainParams::TESTNET = "test";
@@ -20,7 +21,7 @@ void SetupChainParamsBaseOptions() {
                  "which blocks can be solved instantly. This is intended for "
                  "regression testing tools and app development.",
                  true, OptionsCategory::CHAINPARAMS);
-    gArgs.AddArg("-testnet", _("Use the test chain"), false,
+    gArgs.AddArg("-testnet", "Use the test chain", false,
                  OptionsCategory::CHAINPARAMS);
 }
 
@@ -33,15 +34,20 @@ const CBaseChainParams &BaseParams() {
 
 std::unique_ptr<CBaseChainParams>
 CreateBaseChainParams(const std::string &chain) {
-    if (chain == CBaseChainParams::MAIN)
+    if (chain == CBaseChainParams::MAIN) {
         return std::make_unique<CBaseChainParams>("", 8332);
-    else if (chain == CBaseChainParams::TESTNET)
+    }
+
+    if (chain == CBaseChainParams::TESTNET) {
         return std::make_unique<CBaseChainParams>("testnet3", 18332);
-    else if (chain == CBaseChainParams::REGTEST)
+    }
+
+    if (chain == CBaseChainParams::REGTEST) {
         return std::make_unique<CBaseChainParams>("regtest", 18443);
-    else
-        throw std::runtime_error(
-            strprintf("%s: Unknown chain %s.", __func__, chain));
+    }
+
+    throw std::runtime_error(
+        strprintf("%s: Unknown chain %s.", __func__, chain));
 }
 
 void SelectBaseParams(const std::string &chain) {

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Copyright (c) 2010 ArtForz -- public domain half-a-node
 # Copyright (c) 2012 Jeff Garzik
-# Copyright (c) 2010-2017 The Bitcoin Core developers
+# Copyright (c) 2010-2019 The Bitcoin Core developers
 # Distributed under the MIT software license, see the accompanying
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
 """Bitcoin test framework primitive and message structures
@@ -28,16 +28,18 @@ import struct
 import time
 
 from test_framework.siphash import siphash256
-from test_framework.util import bytes_to_hex_str, hex_str_to_bytes
+from test_framework.util import hex_str_to_bytes
 
 MIN_VERSION_SUPPORTED = 60001
 # past bip-31 for ping/pong
 MY_VERSION = 70014
 MY_SUBVERSION = b"/python-mininode-tester:0.0.3/"
-# from version 70001 onwards, fRelay should be appended to version messages (BIP37)
+# from version 70001 onwards, fRelay should be appended to version
+# messages (BIP37)
 MY_RELAY = 1
 
 MAX_INV_SZ = 50000
+MAX_LOCATOR_SZ = 101
 MAX_BLOCK_BASE_SIZE = 1000000
 
 # 1 BCH in satoshis
@@ -53,6 +55,7 @@ NODE_NETWORK_LIMITED = (1 << 10)
 
 MSG_TX = 1
 MSG_BLOCK = 2
+MSG_CMPCTBLOCK = 4
 MSG_TYPE_MASK = 0xffffffff >> 2
 
 # Serialization/deserialization tools
@@ -198,7 +201,7 @@ def FromHex(obj, hex_string):
 
 
 def ToHex(obj):
-    return bytes_to_hex_str(obj.serialize())
+    return obj.serialize().hex()
 
 # Objects that map to bitcoind objects, which can be serialized/deserialized
 
@@ -334,7 +337,7 @@ class CTxIn:
 
     def __repr__(self):
         return "CTxIn(prevout={} scriptSig={} nSequence={})".format(
-            repr(self.prevout), bytes_to_hex_str(self.scriptSig), self.nSequence)
+            repr(self.prevout), self.scriptSig.hex(), self.nSequence)
 
 
 class CTxOut:
@@ -356,8 +359,7 @@ class CTxOut:
 
     def __repr__(self):
         return "CTxOut(nValue={}.{:08d} scriptPubKey={})".format(
-            self.nValue // COIN, self.nValue % COIN,
-            bytes_to_hex_str(self.scriptPubKey))
+            self.nValue // COIN, self.nValue % COIN, self.scriptPubKey.hex())
 
 
 class CTransaction:
@@ -646,7 +648,7 @@ class HeaderAndShortIDs:
         self.shortids = []
         self.prefilled_txn = []
 
-        if p2pheaders_and_shortids != None:
+        if p2pheaders_and_shortids is not None:
             self.header = p2pheaders_and_shortids.header
             self.nonce = p2pheaders_and_shortids.nonce
             self.shortids = p2pheaders_and_shortids.shortids
@@ -703,7 +705,7 @@ class BlockTransactionsRequest:
 
     def __init__(self, blockhash=0, indexes=None):
         self.blockhash = blockhash
-        self.indexes = indexes if indexes != None else []
+        self.indexes = indexes if indexes is not None else []
 
     def deserialize(self, f):
         self.blockhash = deser_uint256(f)
@@ -745,7 +747,7 @@ class BlockTransactions:
 
     def __init__(self, blockhash=0, transactions=None):
         self.blockhash = blockhash
-        self.transactions = transactions if transactions != None else []
+        self.transactions = transactions if transactions is not None else []
 
     def deserialize(self, f):
         self.blockhash = deser_uint256(f)
@@ -790,7 +792,8 @@ class CPartialMerkleTree:
         return r
 
     def __repr__(self):
-        return "CPartialMerkleTree(nTransactions={}, vHash={}, vBits={})".format(self.nTransactions, repr(self.vHash), repr(self.vBits))
+        return "CPartialMerkleTree(nTransactions={}, vHash={}, vBits={})".format(
+            self.nTransactions, repr(self.vHash), repr(self.vBits))
 
 
 class CMerkleBlock:
@@ -811,7 +814,8 @@ class CMerkleBlock:
         return r
 
     def __repr__(self):
-        return "CMerkleBlock(header={}, txn={})".format(repr(self.header), repr(self.txn))
+        return "CMerkleBlock(header={}, txn={})".format(
+            repr(self.header), repr(self.txn))
 
 
 # Objects that correspond to messages on the wire
@@ -835,34 +839,23 @@ class msg_version:
 
     def deserialize(self, f):
         self.nVersion = struct.unpack("<i", f.read(4))[0]
-        if self.nVersion == 10300:
-            self.nVersion = 300
         self.nServices = struct.unpack("<Q", f.read(8))[0]
         self.nTime = struct.unpack("<q", f.read(8))[0]
         self.addrTo = CAddress()
         self.addrTo.deserialize(f, False)
 
-        if self.nVersion >= 106:
-            self.addrFrom = CAddress()
-            self.addrFrom.deserialize(f, False)
-            self.nNonce = struct.unpack("<Q", f.read(8))[0]
-            self.strSubVer = deser_string(f)
-        else:
-            self.addrFrom = None
-            self.nNonce = None
-            self.strSubVer = None
-            self.nStartingHeight = None
+        self.addrFrom = CAddress()
+        self.addrFrom.deserialize(f, False)
+        self.nNonce = struct.unpack("<Q", f.read(8))[0]
+        self.strSubVer = deser_string(f)
 
-        if self.nVersion >= 209:
-            self.nStartingHeight = struct.unpack("<i", f.read(4))[0]
-        else:
-            self.nStartingHeight = None
+        self.nStartingHeight = struct.unpack("<i", f.read(4))[0]
 
         if self.nVersion >= 70001:
             # Relay field is optional for version 70001 onwards
             try:
                 self.nRelay = struct.unpack("<b", f.read(1))[0]
-            except:
+            except Exception:
                 self.nRelay = 0
         else:
             self.nRelay = 0
@@ -946,7 +939,7 @@ class msg_getdata:
     command = b"getdata"
 
     def __init__(self, inv=None):
-        self.inv = inv if inv != None else []
+        self.inv = inv if inv is not None else []
 
     def deserialize(self, f):
         self.inv = deser_vector(f, CInv)
@@ -1209,16 +1202,16 @@ class msg_reject:
         self.message = deser_string(f)
         self.code = struct.unpack("<B", f.read(1))[0]
         self.reason = deser_string(f)
-        if (self.code != self.REJECT_MALFORMED and
-                (self.message == b"block" or self.message == b"tx")):
+        if (self.code != self.REJECT_MALFORMED
+                and (self.message == b"block" or self.message == b"tx")):
             self.data = deser_uint256(f)
 
     def serialize(self):
         r = ser_string(self.message)
         r += struct.pack("<B", self.code)
         r += ser_string(self.reason)
-        if (self.code != self.REJECT_MALFORMED and
-                (self.message == b"block" or self.message == b"tx")):
+        if (self.code != self.REJECT_MALFORMED
+                and (self.message == b"block" or self.message == b"tx")):
             r += ser_uint256(self.data)
         return r
 

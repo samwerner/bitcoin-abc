@@ -12,8 +12,8 @@
 #include <cmath>
 
 int CAddrInfo::GetTriedBucket(const uint256 &nKey) const {
-    uint64_t hash1 = (CHashWriter(SER_GETHASH, 0) << nKey << GetKey())
-                         .GetCheapHash();
+    uint64_t hash1 =
+        (CHashWriter(SER_GETHASH, 0) << nKey << GetKey()).GetCheapHash();
     uint64_t hash2 =
         (CHashWriter(SER_GETHASH, 0)
          << nKey << GetGroup() << (hash1 % ADDRMAN_TRIED_BUCKETS_PER_GROUP))
@@ -554,7 +554,9 @@ int CAddrMan::Check_() {
 
 void CAddrMan::GetAddr_(std::vector<CAddress> &vAddr) {
     unsigned int nNodes = ADDRMAN_GETADDR_MAX_PCT * vRandom.size() / 100;
-    if (nNodes > ADDRMAN_GETADDR_MAX) nNodes = ADDRMAN_GETADDR_MAX;
+    if (nNodes > ADDRMAN_GETADDR_MAX) {
+        nNodes = ADDRMAN_GETADDR_MAX;
+    }
 
     // gather a list of random nodes, skipping those of low quality
     for (unsigned int n = 0; n < vRandom.size(); n++) {

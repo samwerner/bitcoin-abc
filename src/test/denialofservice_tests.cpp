@@ -48,7 +48,9 @@ struct COrphanTx {
     NodeId fromPeer;
     int64_t nTimeExpire;
 };
-extern std::map<uint256, COrphanTx> mapOrphanTransactions;
+extern CCriticalSection g_cs_orphans;
+extern std::map<uint256, COrphanTx>
+    mapOrphanTransactions GUARDED_BY(g_cs_orphans);
 
 static CService ip(uint32_t i) {
     struct in_addr s;
@@ -91,8 +93,8 @@ BOOST_AUTO_TEST_CASE(outbound_slow_chain_eviction) {
     // This test requires that we have a chain with non-zero work.
     {
         LOCK(cs_main);
-        BOOST_CHECK(chainActive.Tip() != nullptr);
-        BOOST_CHECK(chainActive.Tip()->nChainWork > 0);
+        BOOST_CHECK(::ChainActive().Tip() != nullptr);
+        BOOST_CHECK(::ChainActive().Tip()->nChainWork > 0);
     }
 
     // Test starts here
@@ -392,7 +394,7 @@ BOOST_AUTO_TEST_CASE(DoS_bantime) {
 
 static CTransactionRef RandomOrphan() {
     std::map<uint256, COrphanTx>::iterator it;
-    LOCK(cs_main);
+    LOCK2(cs_main, g_cs_orphans);
     it = mapOrphanTransactions.lower_bound(InsecureRand256());
     if (it == mapOrphanTransactions.end()) {
         it = mapOrphanTransactions.begin();
@@ -452,13 +454,14 @@ BOOST_AUTO_TEST_CASE(DoS_mapOrphans) {
         SignSignature(keystore, *txPrev, tx, 0, SigHashType());
         // Re-use same signature for other inputs
         // (they don't have to be valid for this test)
-        for (unsigned int j = 1; j < tx.vin.size(); j++)
+        for (unsigned int j = 1; j < tx.vin.size(); j++) {
             tx.vin[j].scriptSig = tx.vin[0].scriptSig;
+        }
 
         BOOST_CHECK(!AddOrphanTx(MakeTransactionRef(tx), i));
     }
 
-    LOCK(cs_main);
+    LOCK2(cs_main, g_cs_orphans);
     // Test EraseOrphansFor:
     for (NodeId i = 0; i < 3; i++) {
         size_t sizeBefore = mapOrphanTransactions.size();

@@ -2,6 +2,7 @@
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
+#include <coins.h>
 #include <consensus/consensus.h>
 #include <consensus/tx_verify.h>
 #include <consensus/validation.h>
@@ -153,10 +154,10 @@ static void BuildTxs(CMutableTransaction &spendingTx, CCoinsViewCache &coins,
     AddCoins(coins, CTransaction(creationTx), 0);
 }
 
-BOOST_AUTO_TEST_CASE(GetTxSigOpCost) {
+BOOST_AUTO_TEST_CASE(GetTxSigOpCount) {
     // Transaction creates outputs
     CMutableTransaction creationTx;
-    // Transaction that spends outputs and whose sig op cost is going to be
+    // Transaction that spends outputs and whose sig op count is going to be
     // tested
     CMutableTransaction spendingTx;
 
@@ -248,41 +249,6 @@ BOOST_AUTO_TEST_CASE(test_consensus_sigops_limit) {
     BOOST_CHECK_EQUAL(
         GetMaxBlockSigOpsCount(std::numeric_limits<uint32_t>::max()),
         4295 * MAX_BLOCK_SIGOPS_PER_MB);
-}
-
-BOOST_AUTO_TEST_CASE(test_max_sigops_per_tx) {
-    CMutableTransaction tx;
-    tx.nVersion = 1;
-    tx.vin.resize(1);
-    tx.vin[0].prevout = COutPoint(TxId(InsecureRand256()), 0);
-    tx.vin[0].scriptSig = CScript();
-    tx.vout.resize(1);
-    tx.vout[0].nValue = SATOSHI;
-    tx.vout[0].scriptPubKey = CScript();
-
-    {
-        CValidationState state;
-        BOOST_CHECK(CheckRegularTransaction(CTransaction(tx), state));
-    }
-
-    // Get just before the limit.
-    for (size_t i = 0; i < MAX_TX_SIGOPS_COUNT; i++) {
-        tx.vout[0].scriptPubKey << OP_CHECKSIG;
-    }
-
-    {
-        CValidationState state;
-        BOOST_CHECK(CheckRegularTransaction(CTransaction(tx), state));
-    }
-
-    // And go over.
-    tx.vout[0].scriptPubKey << OP_CHECKSIG;
-
-    {
-        CValidationState state;
-        BOOST_CHECK(!CheckRegularTransaction(CTransaction(tx), state));
-        BOOST_CHECK_EQUAL(state.GetRejectReason(), "bad-txn-sigops");
-    }
 }
 
 BOOST_AUTO_TEST_SUITE_END()

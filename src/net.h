@@ -1,6 +1,6 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
 // Copyright (c) 2009-2016 The Bitcoin Core developers
-// Copyright (c) 2017 The Bitcoin developers
+// Copyright (c) 2017-2019 The Bitcoin developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -57,7 +57,8 @@ static const unsigned int MAX_INV_SZ = 50000;
 static_assert(MAX_PROTOCOL_MESSAGE_LENGTH > MAX_INV_SZ * sizeof(CInv),
               "Max protocol message length must be greater than largest "
               "possible INV message");
-
+/** The maximum number of entries in a locator */
+static const unsigned int MAX_LOCATOR_SZ = 101;
 /** The maximum number of new addresses to accumulate before announcing. */
 static const unsigned int MAX_ADDR_TO_SEND = 1000;
 /** Maximum length of strSubVer in `version` message */
@@ -74,10 +75,6 @@ static const bool DEFAULT_UPNP = USE_UPNP;
 #else
 static const bool DEFAULT_UPNP = false;
 #endif
-/** The maximum number of entries in mapAskFor */
-static const size_t MAPASKFOR_MAX_SZ = MAX_INV_SZ;
-/** The maximum number of entries in setAskFor (larger due to getdata latency)*/
-static const size_t SETASKFOR_MAX_SZ = 2 * MAX_INV_SZ;
 /** The maximum number of peer connections to maintain. */
 static const unsigned int DEFAULT_MAX_PEER_CONNECTIONS = 125;
 /** The default for -maxuploadtarget. 0 = Unlimited */
@@ -300,6 +297,13 @@ public:
 
     void WakeMessageHandler();
 
+    /**
+     * Attempts to obfuscate tx time through exponentially distributed emitting.
+     * Works assuming that a single interval is used.
+     * Variable intervals will result in privacy decrease.
+     */
+    int64_t PoissonNextSendInbound(int64_t now, int average_interval_seconds);
+
 private:
     struct ListenSocket {
         SOCKET socket;
@@ -427,6 +431,8 @@ private:
      */
     std::atomic_bool m_try_another_outbound_peer;
 
+    std::atomic<int64_t> m_next_send_inv_to_incoming{0};
+
     friend struct CConnmanTest;
 };
 
@@ -479,25 +485,29 @@ enum {
 
 bool IsPeerAddrLocalGood(CNode *pnode);
 void AdvertiseLocal(CNode *pnode);
-void SetLimited(enum Network net, bool fLimited = true);
-bool IsLimited(enum Network net);
-bool IsLimited(const CNetAddr &addr);
+
+/**
+ * Mark a network as reachable or unreachable (no automatic connects to it)
+ * @note Networks are reachable by default
+ */
+void SetReachable(enum Network net, bool reachable);
+/** @returns true if the network is reachable, false otherwise */
+bool IsReachable(enum Network net);
+/** @returns true if the address is in a reachable network, false otherwise */
+bool IsReachable(const CNetAddr &addr);
+
 bool AddLocal(const CService &addr, int nScore = LOCAL_NONE);
 bool AddLocal(const CNetAddr &addr, int nScore = LOCAL_NONE);
 void RemoveLocal(const CService &addr);
 bool SeenLocal(const CService &addr);
 bool IsLocal(const CService &addr);
 bool GetLocal(CService &addr, const CNetAddr *paddrPeer = nullptr);
-bool IsReachable(enum Network net);
-bool IsReachable(const CNetAddr &addr);
 CAddress GetLocalAddress(const CNetAddr *paddrPeer,
                          ServiceFlags nLocalServices);
 
 extern bool fDiscover;
 extern bool fListen;
 extern bool fRelayTxes;
-
-extern limitedmap<uint256, int64_t> mapAlreadyAskedFor;
 
 struct LocalServiceInfo {
     int nScore;
@@ -645,6 +655,8 @@ public:
         GUARDED_BY(cs_SubVer);
     // Used for both cleanSubVer and strSubVer.
     CCriticalSection cs_SubVer;
+    // This peer is preferred for eviction.
+    bool m_prefer_evict{false};
     // This peer can bypass DoS banning.
     bool fWhitelisted{false};
     // If true this node is being used as a short lived feeler.
@@ -679,7 +691,7 @@ protected:
     mapMsgCmdSize mapRecvBytesPerMsgCmd GUARDED_BY(cs_vRecv);
 
 public:
-    uint256 hashContinue;
+    BlockHash hashContinue;
     std::atomic<int> nStartingHeight{-1};
 
     // flood relay
@@ -694,17 +706,15 @@ public:
     CRollingBloomFilter filterInventoryKnown GUARDED_BY(cs_inventory);
     // Set of transaction ids we still have to announce. They are sorted by the
     // mempool before relay, so the order is not important.
-    std::set<uint256> setInventoryTxToSend;
+    std::set<TxId> setInventoryTxToSend;
     // List of block ids we still have announce. There is no final sorting
     // before sending, as they are always sent immediately and in the order
     // requested.
     std::vector<uint256> vInventoryBlockToSend GUARDED_BY(cs_inventory);
     CCriticalSection cs_inventory;
-    std::set<uint256> setAskFor;
-    std::multimap<int64_t, CInv> mapAskFor;
     int64_t nNextInvSend{0};
     // Used for headers announcements - unfiltered blocks to relay.
-    std::vector<uint256> vBlockHashesToAnnounce GUARDED_BY(cs_inventory);
+    std::vector<BlockHash> vBlockHashesToAnnounce GUARDED_BY(cs_inventory);
     // Used for BIP35 mempool sending.
     bool fSendMempool GUARDED_BY(cs_inventory){false};
 
@@ -814,20 +824,19 @@ public:
     void PushInventory(const CInv &inv) {
         LOCK(cs_inventory);
         if (inv.type == MSG_TX) {
-            if (!filterInventoryKnown.contains(inv.hash)) {
-                setInventoryTxToSend.insert(inv.hash);
+            const TxId txid(inv.hash);
+            if (!filterInventoryKnown.contains(txid)) {
+                setInventoryTxToSend.insert(txid);
             }
         } else if (inv.type == MSG_BLOCK) {
             vInventoryBlockToSend.push_back(inv.hash);
         }
     }
 
-    void PushBlockHash(const uint256 &hash) {
+    void PushBlockHash(const BlockHash &hash) {
         LOCK(cs_inventory);
         vBlockHashesToAnnounce.push_back(hash);
     }
-
-    void AskFor(const CInv &inv);
 
     void CloseSocketDisconnect();
 
@@ -844,7 +853,7 @@ public:
  * Return a timestamp in the future (in microseconds) for exponentially
  * distributed events.
  */
-int64_t PoissonNextSend(int64_t nNow, int average_interval_seconds);
+int64_t PoissonNextSend(int64_t now, int average_interval_seconds);
 
 std::string getSubVersionEB(uint64_t MaxBlockSize);
 std::string userAgent(const Config &config);

@@ -14,6 +14,7 @@
 #include <netbase.h>
 #include <policy/policy.h>
 #include <rpc/protocol.h>
+#include <rpc/util.h>
 #include <sync.h>
 #include <timedata.h>
 #include <ui_interface.h>
@@ -247,7 +248,7 @@ static UniValue addnode(const Config &config, const JSONRPCRequest &request) {
         (strCommand != "onetry" && strCommand != "add" &&
          strCommand != "remove")) {
         throw std::runtime_error(
-            "addnode \"node\" \"add|remove|onetry\"\n"
+            "addnode \"node\" \"command\"\n"
             "\nAttempts to add or remove a node from the addnode list.\n"
             "Or try a connection to a node once.\n"
             "Nodes added using addnode (or -connect) are protected from DoS "
@@ -297,7 +298,7 @@ static UniValue disconnectnode(const Config &config,
     if (request.fHelp || request.params.size() == 0 ||
         request.params.size() >= 3) {
         throw std::runtime_error(
-            "disconnectnode \"[address]\" [nodeid]\n"
+            "disconnectnode ( \"address\" nodeid )\n"
             "\nImmediately disconnects from the specified peer node.\n"
             "\nStrictly one out of 'address' and 'nodeid' can be provided to "
             "identify the node.\n"
@@ -497,7 +498,7 @@ static UniValue GetNetworksInfo() {
         UniValue obj(UniValue::VOBJ);
         GetProxy(network, proxy);
         obj.pushKV("name", GetNetworkName(network));
-        obj.pushKV("limited", IsLimited(network));
+        obj.pushKV("limited", !IsReachable(network));
         obj.pushKV("reachable", IsReachable(network));
         obj.pushKV("proxy", proxy.IsValid() ? proxy.proxy.ToStringIPPort()
                                             : std::string());
@@ -549,7 +550,7 @@ static UniValue getnetworkinfo(const Config &config,
             "  ,...\n"
             "  ],\n"
             "  \"relayfee\": x.xxxxxxxx,                (numeric) minimum "
-            "relay fee for non-free transactions in " +
+            "relay fee for transactions in " +
             CURRENCY_UNIT +
             "/kB\n"
             "  \"excessutxocharge\": x.xxxxxxxx,        (numeric) minimum "
@@ -622,7 +623,7 @@ static UniValue setban(const Config &config, const JSONRPCRequest &request) {
     if (request.fHelp || request.params.size() < 2 ||
         (strCommand != "add" && strCommand != "remove")) {
         throw std::runtime_error(
-            "setban \"subnet\" \"add|remove\" (bantime) (absolute)\n"
+            "setban \"subnet\" \"command\" ( bantime absolute )\n"
             "\nAttempts to add or remove a IP/Subnet from the banned list.\n"
             "\nArguments:\n"
             "1. \"subnet\"       (string, required) The IP/Subnet (see "
@@ -766,7 +767,7 @@ static UniValue setnetworkactive(const Config &config,
                                  const JSONRPCRequest &request) {
     if (request.fHelp || request.params.size() != 1) {
         throw std::runtime_error(
-            "setnetworkactive true|false\n"
+            "setnetworkactive state\n"
             "\nDisable/enable all p2p network activity.\n"
             "\nArguments:\n"
             "1. \"state\"        (boolean, required) true to "
@@ -782,6 +783,67 @@ static UniValue setnetworkactive(const Config &config,
     g_connman->SetNetworkActive(request.params[0].get_bool());
 
     return g_connman->GetNetworkActive();
+}
+
+static UniValue getnodeaddresses(const Config &config,
+                                 const JSONRPCRequest &request) {
+    if (request.fHelp || request.params.size() > 1) {
+        throw std::runtime_error(
+            "getnodeaddresses ( count )\n"
+            "\nReturn known addresses which can potentially be used to find "
+            "new nodes in the network\n"
+            "\nArguments:\n"
+            "1. \"count\"    (numeric, optional) How many addresses to return. "
+            "Limited to the smaller of " +
+            std::to_string(ADDRMAN_GETADDR_MAX) + " or " +
+            std::to_string(ADDRMAN_GETADDR_MAX_PCT) +
+            "% of all known addresses. (default = 1)\n"
+            "\nResult:\n"
+            "[\n"
+            "  {\n"
+            "    \"time\": ttt,                (numeric) Timestamp in seconds "
+            "since epoch (Jan 1 1970 GMT) keeping track of when the node was "
+            "last seen\n"
+            "    \"services\": n,              (numeric) The services offered\n"
+            "    \"address\": \"host\",          (string) The address of the "
+            "node\n"
+            "    \"port\": n                   (numeric) The port of the node\n"
+            "  }\n"
+            "  ,....\n"
+            "]\n"
+            "\nExamples:\n" +
+            HelpExampleCli("getnodeaddresses", "8") +
+            HelpExampleRpc("getnodeaddresses", "8"));
+    }
+    if (!g_connman) {
+        throw JSONRPCError(
+            RPC_CLIENT_P2P_DISABLED,
+            "Error: Peer-to-peer functionality missing or disabled");
+    }
+
+    int count = 1;
+    if (!request.params[0].isNull()) {
+        count = request.params[0].get_int();
+        if (count <= 0) {
+            throw JSONRPCError(RPC_INVALID_PARAMETER,
+                               "Address count out of range");
+        }
+    }
+    // returns a shuffled list of CAddress
+    std::vector<CAddress> vAddr = g_connman->GetAddresses();
+    UniValue ret(UniValue::VARR);
+
+    int address_return_count = std::min<int>(count, vAddr.size());
+    for (int i = 0; i < address_return_count; ++i) {
+        UniValue obj(UniValue::VOBJ);
+        const CAddress &addr = vAddr[i];
+        obj.pushKV("time", int(addr.nTime));
+        obj.pushKV("services", uint64_t(addr.nServices));
+        obj.pushKV("address", addr.ToStringIP());
+        obj.pushKV("port", addr.GetPort());
+        ret.push_back(obj);
+    }
+    return ret;
 }
 
 // clang-format off
@@ -800,6 +862,7 @@ static const ContextFreeRPCCommand commands[] = {
     { "network",            "listbanned",             listbanned,             {} },
     { "network",            "clearbanned",            clearbanned,            {} },
     { "network",            "setnetworkactive",       setnetworkactive,       {"state"} },
+    { "network",            "getnodeaddresses",       getnodeaddresses,       {"count"} },
 };
 // clang-format on
 

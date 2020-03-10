@@ -22,7 +22,7 @@ We test the mempool coherence in 3 cases:
 from test_framework.blocktools import (
     create_block,
     create_coinbase,
-    create_transaction,
+    create_tx_with_script,
     make_conform_to_ctor,
 )
 from test_framework.key import CECKey
@@ -78,7 +78,7 @@ def create_fund_and_activation_specific_spending_tx(spend, pre_fork_only):
 
     # Fund transaction
     script = CScript([public_key, OP_CHECKSIG])
-    txfund = create_transaction(
+    txfund = create_tx_with_script(
         spend.tx, spend.n, b'', 50 * COIN, script)
     txfund.rehash()
 
@@ -103,11 +103,13 @@ def create_fund_and_activation_specific_spending_tx(spend, pre_fork_only):
 
 
 def create_fund_and_pre_fork_only_tx(spend):
-    return create_fund_and_activation_specific_spending_tx(spend, pre_fork_only=True)
+    return create_fund_and_activation_specific_spending_tx(
+        spend, pre_fork_only=True)
 
 
 def create_fund_and_post_fork_only_tx(spend):
-    return create_fund_and_activation_specific_spending_tx(spend, pre_fork_only=False)
+    return create_fund_and_activation_specific_spending_tx(
+        spend, pre_fork_only=False)
 
 
 # ---Mempool coherence on activations test---
@@ -132,7 +134,7 @@ class MempoolCoherenceOnActivationsTest(BitcoinTestFramework):
                             EXTRA_ARG]]
 
     def next_block(self, number):
-        if self.tip == None:
+        if self.tip is None:
             base_block_hash = self.genesis_hash
             block_time = FIRST_BLOCK_TIME
         else:
@@ -193,7 +195,7 @@ class MempoolCoherenceOnActivationsTest(BitcoinTestFramework):
         # send a txn to the mempool and check it was accepted
         def send_transaction_to_mempool(tx):
             tx_id = node.sendrawtransaction(ToHex(tx))
-            assert(tx_id in node.getrawmempool())
+            assert tx_id in node.getrawmempool()
 
         # checks the mempool has exactly the same txns as in the provided list
         def check_mempool_equal(txns):
@@ -203,7 +205,7 @@ class MempoolCoherenceOnActivationsTest(BitcoinTestFramework):
         # scriptPub=OP_TRUE coin into another. Returns the transaction and its
         # spendable output for further chaining.
         def create_always_valid_chained_tx(spend):
-            tx = create_transaction(
+            tx = create_tx_with_script(
                 spend.tx, spend.n, b'', spend.tx.vout[0].nValue - 1000, CScript([OP_TRUE]))
             tx.rehash()
             return tx, PreviousSpendableOutput(tx, 0)
@@ -249,8 +251,9 @@ class MempoolCoherenceOnActivationsTest(BitcoinTestFramework):
             node.p2p.send_blocks_and_test([block(5200 + i)], node)
 
         # Check we are just before the activation time
-        assert_equal(node.getblockheader(node.getbestblockhash())['mediantime'],
-                     ACTIVATION_TIME - 1)
+        assert_equal(
+            node.getblockchaininfo()['mediantime'],
+            ACTIVATION_TIME - 1)
 
         # We are just before the fork. Pre-fork-only and always-valid chained
         # txns (tx_chain0, tx_chain1) are valid, post-fork-only txns are
@@ -358,8 +361,9 @@ class MempoolCoherenceOnActivationsTest(BitcoinTestFramework):
         # Perform the reorg
         node.p2p.send_blocks_and_test(reorg_blocks, node)
         # reorg finishes after the fork
-        assert_equal(node.getblockheader(node.getbestblockhash())['mediantime'],
-                     ACTIVATION_TIME+2)
+        assert_equal(
+            node.getblockchaininfo()['mediantime'],
+            ACTIVATION_TIME + 2)
         # In old mempool: tx_chain2, tx_post1
         # Recovered from blocks: tx_chain0, tx_chain1, tx_post0
         # Lost from blocks: tx_pre0

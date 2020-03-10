@@ -31,9 +31,6 @@ from test_framework.script import (
 from test_framework.test_framework import BitcoinTestFramework
 from test_framework.util import assert_equal
 
-# far into the future
-REPLAY_PROTECTION_START_TIME = 2000000000
-
 
 class PreviousSpendableOutput():
 
@@ -50,16 +47,14 @@ class TransactionOrderingTest(BitcoinTestFramework):
         self.block_heights = {}
         self.tip = None
         self.blocks = {}
-        self.extra_args = [['-whitelist=127.0.0.1',
-                            '-relaypriority=0',
-                            "-replayprotectionactivationtime={}".format(REPLAY_PROTECTION_START_TIME)]]
+        self.extra_args = [['-whitelist=127.0.0.1']]
 
     def add_transactions_to_block(self, block, tx_list):
         [tx.rehash() for tx in tx_list]
         block.vtx.extend(tx_list)
 
     def next_block(self, number, spend=None, tx_count=0):
-        if self.tip == None:
+        if self.tip is None:
             base_block_hash = self.genesis_hash
             block_time = int(time.time()) + 1
         else:
@@ -69,7 +64,7 @@ class TransactionOrderingTest(BitcoinTestFramework):
         height = self.block_heights[base_block_hash] + 1
         coinbase = create_coinbase(height)
         coinbase.rehash()
-        if spend == None:
+        if spend is None:
             # We need to have something to spend to fill the block.
             block = create_block(base_block_hash, coinbase, block_time)
         else:
@@ -100,13 +95,15 @@ class TransactionOrderingTest(BitcoinTestFramework):
             tx = get_base_transaction()
 
             # Make it the same format as transaction added for padding and save the size.
-            # It's missing the padding output, so we add a constant to account for it.
+            # It's missing the padding output, so we add a constant to account
+            # for it.
             tx.rehash()
 
             # Add the transaction to the block
             self.add_transactions_to_block(block, [tx])
 
-            # If we have a transaction count requirement, just fill the block until we get there
+            # If we have a transaction count requirement, just fill the block
+            # until we get there
             while len(block.vtx) < tx_count:
                 # Create the new transaction and add it.
                 tx = get_base_transaction()

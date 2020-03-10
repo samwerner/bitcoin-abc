@@ -1,4 +1,4 @@
-// Copyright (c) 2011-2016 The Bitcoin Core developers
+// Copyright (c) 2011-2019 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -7,13 +7,21 @@
 
 #include <chainparams.h>
 #include <interfaces/wallet.h>
+
+#if defined(HAVE_CONFIG_H)
+#include <config/bitcoin-config.h>
+#endif
+
+#ifdef ENABLE_BIP70
 #include <qt/paymentrequestplus.h>
+#endif
 #include <qt/walletmodeltransaction.h>
 #include <support/allocators/secure.h>
 
 #include <QObject>
 
 #include <map>
+#include <memory>
 #include <vector>
 
 class AddressTableModel;
@@ -59,8 +67,14 @@ public:
     // If from a payment request, this is used for storing the memo
     QString message;
 
+#ifdef ENABLE_BIP70
     // If from a payment request, paymentRequest.IsInitialized() will be true
     PaymentRequestPlus paymentRequest;
+#else
+    // If building with BIP70 is disabled, keep the payment request around as
+    // serialized string to ensure load/store is lossless
+    std::string sPaymentRequest;
+#endif
     // Empty if no authentication or invalid signature/cert/etc.
     QString authenticatedMerchant;
 
@@ -77,10 +91,12 @@ public:
         std::string sAddress = address.toStdString();
         std::string sLabel = label.toStdString();
         std::string sMessage = message.toStdString();
+#ifdef ENABLE_BIP70
         std::string sPaymentRequest;
         if (!ser_action.ForRead() && paymentRequest.IsInitialized()) {
             paymentRequest.SerializeToString(&sPaymentRequest);
         }
+#endif
 
         std::string sAuthenticatedMerchant =
             authenticatedMerchant.toStdString();
@@ -97,10 +113,12 @@ public:
             address = QString::fromStdString(sAddress);
             label = QString::fromStdString(sLabel);
             message = QString::fromStdString(sMessage);
+#ifdef ENABLE_BIP70
             if (!sPaymentRequest.empty()) {
                 paymentRequest.parse(QByteArray::fromRawData(
                     sPaymentRequest.data(), sPaymentRequest.size()));
             }
+#endif
 
             authenticatedMerchant =
                 QString::fromStdString(sAuthenticatedMerchant);
@@ -208,6 +226,8 @@ public:
                             const std::string &sRequest);
 
     static bool isWalletEnabled();
+    bool privateKeysDisabled() const;
+    bool canGetAddresses() const;
 
     interfaces::Node &node() const { return m_node; }
     interfaces::Wallet &wallet() const { return *m_wallet; }
@@ -215,6 +235,7 @@ public:
     const CChainParams &getChainParams() const;
 
     QString getWalletName() const;
+    QString getDisplayName() const;
 
     bool isMultiwallet();
 
@@ -230,6 +251,7 @@ private:
     std::unique_ptr<interfaces::Handler> m_handler_transaction_changed;
     std::unique_ptr<interfaces::Handler> m_handler_show_progress;
     std::unique_ptr<interfaces::Handler> m_handler_watch_only_changed;
+    std::unique_ptr<interfaces::Handler> m_handler_can_get_addrs_changed;
     interfaces::Node &m_node;
 
     bool fHaveWatchOnly;
@@ -282,6 +304,9 @@ Q_SIGNALS:
 
     // Signal that wallet is about to be removed
     void unload();
+
+    // Notify that there are now keys in the keypool
+    void canGetAddressesChanged();
 
 public Q_SLOTS:
     /** Wallet status might have changed. */

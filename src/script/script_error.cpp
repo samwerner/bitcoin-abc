@@ -36,6 +36,8 @@ const char *ScriptErrorString(const ScriptError serror) {
             return "Signature count negative or greater than pubkey count";
         case ScriptError::PUBKEY_COUNT:
             return "Pubkey count negative or limit exceeded";
+        case ScriptError::INPUT_SIGCHECKS:
+            return "Input SigChecks limit exceeded";
         case ScriptError::INVALID_OPERAND_SIZE:
             return "Invalid operand size";
         case ScriptError::INVALID_NUMBER_RANGE:
@@ -81,8 +83,6 @@ const char *ScriptErrorString(const ScriptError serror) {
             return "Only push operators allowed in signature scripts";
         case ScriptError::SIG_HIGH_S:
             return "Non-canonical signature: S value is unnecessarily high";
-        case ScriptError::SIG_NULLDUMMY:
-            return "Dummy CHECKMULTISIG argument must be zero";
         case ScriptError::MINIMALIF:
             return "OP_IF/NOTIF argument must be minimal";
         case ScriptError::SIG_NULLFAIL:
@@ -98,12 +98,12 @@ const char *ScriptErrorString(const ScriptError serror) {
             return "Public key is neither compressed or uncompressed";
         case ScriptError::CLEANSTACK:
             return "Script did not clean its stack";
-        case ScriptError::NONCOMPRESSED_PUBKEY:
-            return "Using non-compressed public key";
         case ScriptError::ILLEGAL_FORKID:
             return "Illegal use of SIGHASH_FORKID";
         case ScriptError::MUST_USE_FORKID:
             return "Signature must use SIGHASH_FORKID";
+        case ScriptError::SIGCHECKS_LIMIT_EXCEEDED:
+            return "Validation resources exceeded (SigChecks)";
         case ScriptError::UNKNOWN:
         case ScriptError::ERROR_COUNT:
         default:

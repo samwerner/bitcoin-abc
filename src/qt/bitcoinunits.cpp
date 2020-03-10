@@ -16,6 +16,7 @@ QList<BitcoinUnits::Unit> BitcoinUnits::availableUnits() {
     unitlist.append(BCH);
     unitlist.append(mBCH);
     unitlist.append(uBCH);
+    unitlist.append(SAT);
     return unitlist;
 }
 
@@ -24,13 +25,14 @@ bool BitcoinUnits::valid(int unit) {
         case BCH:
         case mBCH:
         case uBCH:
+        case SAT:
             return true;
         default:
             return false;
     }
 }
 
-QString BitcoinUnits::name(int unit) {
+QString BitcoinUnits::longName(int unit) {
     switch (unit) {
         case BCH:
             return QString("BCH");
@@ -38,8 +40,19 @@ QString BitcoinUnits::name(int unit) {
             return QString("mBCH");
         case uBCH:
             return QString::fromUtf8("μBCH");
+        case SAT:
+            return QString("Satoshi (sat)");
         default:
             return QString("???");
+    }
+}
+
+QString BitcoinUnits::shortName(int unit) {
+    switch (unit) {
+        case SAT:
+            return QString("sat");
+        default:
+            return longName(unit);
     }
 }
 
@@ -51,6 +64,9 @@ QString BitcoinUnits::description(int unit) {
             return QString("Milli-Bitcoins (1 / 1" THIN_SP_UTF8 "000)");
         case uBCH:
             return QString("Micro-Bitcoins (1 / 1" THIN_SP_UTF8
+                           "000" THIN_SP_UTF8 "000)");
+        case SAT:
+            return QString("Satoshi (sat) (1 / 100" THIN_SP_UTF8
                            "000" THIN_SP_UTF8 "000)");
         default:
             return QString("???");
@@ -65,6 +81,8 @@ qint64 BitcoinUnits::factor(int unit) {
             return 100000;
         case uBCH:
             return 100;
+        case SAT:
+            return 1;
         default:
             return 100000000;
     }
@@ -78,6 +96,8 @@ int BitcoinUnits::decimals(int unit) {
             return 5;
         case uBCH:
             return 2;
+        case SAT:
+            return 0;
         default:
             return 0;
     }
@@ -96,10 +116,7 @@ QString BitcoinUnits::format(int unit, const Amount nIn, bool fPlus,
     int num_decimals = decimals(unit);
     qint64 n_abs = (n > 0 ? n : -n);
     qint64 quotient = n_abs / coin;
-    qint64 remainder = n_abs % coin;
     QString quotient_str = QString::number(quotient);
-    QString remainder_str =
-        QString::number(remainder).rightJustified(num_decimals, '0');
 
     // Use SI-style thin space separators as these are locale independent and
     // can't be confused with the decimal marker.
@@ -118,7 +135,14 @@ QString BitcoinUnits::format(int unit, const Amount nIn, bool fPlus,
         quotient_str.insert(0, '+');
     }
 
-    return quotient_str + QString(".") + remainder_str;
+    if (num_decimals > 0) {
+        qint64 remainder = n_abs % coin;
+        QString remainder_str =
+            QString::number(remainder).rightJustified(num_decimals, '0');
+        return quotient_str + QString(".") + remainder_str;
+    } else {
+        return quotient_str;
+    }
 }
 
 // NOTE: Using formatWithUnit in an HTML context risks wrapping
@@ -132,7 +156,7 @@ QString BitcoinUnits::format(int unit, const Amount nIn, bool fPlus,
 QString BitcoinUnits::formatWithUnit(int unit, const Amount amount,
                                      bool plussign, SeparatorStyle separators) {
     return format(unit, amount, plussign, separators) + QString(" ") +
-           name(unit);
+           shortName(unit);
 }
 
 QString BitcoinUnits::formatHtmlWithUnit(int unit, const Amount amount,
@@ -184,7 +208,7 @@ bool BitcoinUnits::parse(int unit, const QString &value, Amount *val_out) {
 QString BitcoinUnits::getAmountColumnTitle(int unit) {
     QString amountTitle = QObject::tr("Amount");
     if (BitcoinUnits::valid(unit)) {
-        amountTitle += " (" + BitcoinUnits::name(unit) + ")";
+        amountTitle += " (" + BitcoinUnits::shortName(unit) + ")";
     }
     return amountTitle;
 }
@@ -201,7 +225,7 @@ QVariant BitcoinUnits::data(const QModelIndex &index, int role) const {
         switch (role) {
             case Qt::EditRole:
             case Qt::DisplayRole:
-                return QVariant(name(unit));
+                return QVariant(longName(unit));
             case Qt::ToolTipRole:
                 return QVariant(description(unit));
             case UnitRole:

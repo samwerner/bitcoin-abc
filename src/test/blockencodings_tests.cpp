@@ -10,12 +10,13 @@
 #include <pow.h>
 #include <random.h>
 #include <streams.h>
+#include <txmempool.h>
 
 #include <test/test_bitcoin.h>
 
 #include <boost/test/unit_test.hpp>
 
-std::vector<std::pair<uint256, CTransactionRef>> extra_txn;
+static std::vector<std::pair<TxHash, CTransactionRef>> extra_txn;
 
 struct RegtestingSetup : public TestingSetup {
     RegtestingSetup() : TestingSetup(CBaseChainParams::REGTEST) {}
@@ -38,7 +39,7 @@ static CBlock BuildBlockTestCase() {
     block.vtx.resize(3);
     block.vtx[0] = MakeTransactionRef(tx);
     block.nVersion = 42;
-    block.hashPrevBlock = InsecureRand256();
+    block.hashPrevBlock = BlockHash(InsecureRand256());
     block.nBits = 0x207fffff;
 
     tx.vin[0].prevout = InsecureRandOutPoint();
@@ -63,6 +64,18 @@ static CBlock BuildBlockTestCase() {
     return block;
 }
 
+// BOOST_CHECK_EXCEPTION predicates to check the exception message
+class HasReason {
+public:
+    HasReason(const std::string &reason) : m_reason(reason) {}
+    bool operator()(const std::exception &e) const {
+        return std::string(e.what()).find(m_reason) != std::string::npos;
+    };
+
+private:
+    const std::string m_reason;
+};
+
 // Number of shared use_counts we expect for a tx we haven't touched
 // (block + mempool + our copy from the GetSharedTx call)
 constexpr long SHARED_TX_OFFSET{3};
@@ -73,7 +86,7 @@ BOOST_AUTO_TEST_CASE(SimpleRoundTripTest) {
     CBlock block(BuildBlockTestCase());
 
     LOCK2(cs_main, pool.cs);
-    pool.addUnchecked(block.vtx[2]->GetId(), entry.FromTx(block.vtx[2]));
+    pool.addUnchecked(entry.FromTx(block.vtx[2]));
     BOOST_CHECK_EQUAL(
         pool.mapTx.find(block.vtx[2]->GetId())->GetSharedTx().use_count(),
         SHARED_TX_OFFSET + 0);
@@ -150,7 +163,7 @@ public:
     explicit TestHeaderAndShortIDs(const CBlock &block)
         : TestHeaderAndShortIDs(CBlockHeaderAndShortTxIDs(block)) {}
 
-    uint64_t GetShortID(const uint256 &txhash) const {
+    uint64_t GetShortID(const TxHash &txhash) const {
         CDataStream stream(SER_NETWORK, PROTOCOL_VERSION);
         stream << *this;
         CBlockHeaderAndShortTxIDs base;
@@ -184,12 +197,12 @@ BOOST_AUTO_TEST_CASE(NonCoinbasePreforwardRTTest) {
     CBlock block(BuildBlockTestCase());
 
     LOCK2(cs_main, pool.cs);
-    pool.addUnchecked(block.vtx[2]->GetId(), entry.FromTx(block.vtx[2]));
+    pool.addUnchecked(entry.FromTx(block.vtx[2]));
     BOOST_CHECK_EQUAL(
         pool.mapTx.find(block.vtx[2]->GetId())->GetSharedTx().use_count(),
         SHARED_TX_OFFSET + 0);
 
-    uint256 txhash;
+    TxId txid;
 
     // Test with pre-forwarding tx 1, but not coinbase
     {
@@ -197,8 +210,8 @@ BOOST_AUTO_TEST_CASE(NonCoinbasePreforwardRTTest) {
         shortIDs.prefilledtxn.resize(1);
         shortIDs.prefilledtxn[0] = {1, block.vtx[1]};
         shortIDs.shorttxids.resize(2);
-        shortIDs.shorttxids[0] = shortIDs.GetShortID(block.vtx[0]->GetId());
-        shortIDs.shorttxids[1] = shortIDs.GetShortID(block.vtx[2]->GetId());
+        shortIDs.shorttxids[0] = shortIDs.GetShortID(block.vtx[0]->GetHash());
+        shortIDs.shorttxids[1] = shortIDs.GetShortID(block.vtx[2]->GetHash());
 
         CDataStream stream(SER_NETWORK, PROTOCOL_VERSION);
         stream << shortIDs;
@@ -258,18 +271,18 @@ BOOST_AUTO_TEST_CASE(NonCoinbasePreforwardRTTest) {
             pool.mapTx.find(block.vtx[2]->GetId())->GetSharedTx().use_count(),
             SHARED_TX_OFFSET + 3);
 
-        txhash = block.vtx[2]->GetId();
+        txid = block.vtx[2]->GetId();
         block.vtx.clear();
         block2.vtx.clear();
         block3.vtx.clear();
 
         // + 1 because of partialBlock; -1 because of block.
-        BOOST_CHECK_EQUAL(pool.mapTx.find(txhash)->GetSharedTx().use_count(),
+        BOOST_CHECK_EQUAL(pool.mapTx.find(txid)->GetSharedTx().use_count(),
                           SHARED_TX_OFFSET + 1 - 1);
     }
 
     // -1 because of block
-    BOOST_CHECK_EQUAL(pool.mapTx.find(txhash)->GetSharedTx().use_count(),
+    BOOST_CHECK_EQUAL(pool.mapTx.find(txid)->GetSharedTx().use_count(),
                       SHARED_TX_OFFSET - 1);
 }
 
@@ -279,12 +292,12 @@ BOOST_AUTO_TEST_CASE(SufficientPreforwardRTTest) {
     CBlock block(BuildBlockTestCase());
 
     LOCK2(cs_main, pool.cs);
-    pool.addUnchecked(block.vtx[1]->GetId(), entry.FromTx(block.vtx[1]));
+    pool.addUnchecked(entry.FromTx(block.vtx[1]));
     BOOST_CHECK_EQUAL(
         pool.mapTx.find(block.vtx[1]->GetId())->GetSharedTx().use_count(),
         SHARED_TX_OFFSET + 0);
 
-    uint256 txhash;
+    TxId txid;
 
     // Test with pre-forwarding coinbase + tx 2 with tx 1 in mempool
     {
@@ -294,7 +307,7 @@ BOOST_AUTO_TEST_CASE(SufficientPreforwardRTTest) {
         // id == 1 as it is 1 after index 1
         shortIDs.prefilledtxn[1] = {1, block.vtx[2]};
         shortIDs.shorttxids.resize(1);
-        shortIDs.shorttxids[0] = shortIDs.GetShortID(block.vtx[1]->GetId());
+        shortIDs.shorttxids[0] = shortIDs.GetShortID(block.vtx[1]->GetHash());
 
         CDataStream stream(SER_NETWORK, PROTOCOL_VERSION);
         stream << shortIDs;
@@ -323,17 +336,17 @@ BOOST_AUTO_TEST_CASE(SufficientPreforwardRTTest) {
                           BlockMerkleRoot(block2, &mutated).ToString());
         BOOST_CHECK(!mutated);
 
-        txhash = block.vtx[1]->GetId();
+        txid = block.vtx[1]->GetId();
         block.vtx.clear();
         block2.vtx.clear();
 
         // + 1 because of partialBlock; -1 because of block.
-        BOOST_CHECK_EQUAL(pool.mapTx.find(txhash)->GetSharedTx().use_count(),
+        BOOST_CHECK_EQUAL(pool.mapTx.find(txid)->GetSharedTx().use_count(),
                           SHARED_TX_OFFSET + 1 - 1);
     }
 
     // -1 because of block
-    BOOST_CHECK_EQUAL(pool.mapTx.find(txhash)->GetSharedTx().use_count(),
+    BOOST_CHECK_EQUAL(pool.mapTx.find(txid)->GetSharedTx().use_count(),
                       SHARED_TX_OFFSET - 1);
 }
 
@@ -349,7 +362,7 @@ BOOST_AUTO_TEST_CASE(EmptyBlockRoundTripTest) {
     block.vtx.resize(1);
     block.vtx[0] = MakeTransactionRef(std::move(coinbase));
     block.nVersion = 42;
-    block.hashPrevBlock = InsecureRand256();
+    block.hashPrevBlock = BlockHash(InsecureRand256());
     block.nBits = 0x207fffff;
 
     bool mutated;
@@ -391,7 +404,7 @@ BOOST_AUTO_TEST_CASE(EmptyBlockRoundTripTest) {
 
 BOOST_AUTO_TEST_CASE(TransactionsRequestSerializationTest) {
     BlockTransactionsRequest req1;
-    req1.blockhash = InsecureRand256();
+    req1.blockhash = BlockHash(InsecureRand256());
     req1.indices.resize(4);
     req1.indices[0] = 0;
     req1.indices[1] = 1;
@@ -410,6 +423,67 @@ BOOST_AUTO_TEST_CASE(TransactionsRequestSerializationTest) {
     BOOST_CHECK_EQUAL(req1.indices[1], req2.indices[1]);
     BOOST_CHECK_EQUAL(req1.indices[2], req2.indices[2]);
     BOOST_CHECK_EQUAL(req1.indices[3], req2.indices[3]);
+}
+
+BOOST_AUTO_TEST_CASE(TransactionsRequestDeserializationMaxTest) {
+    // Check that the highest legal index is decoded correctly
+    BlockTransactionsRequest req0;
+    req0.blockhash = BlockHash(InsecureRand256());
+    req0.indices.resize(1);
+
+    using indiceType = decltype(req0.indices)::value_type;
+    static_assert(MAX_SIZE < std::numeric_limits<indiceType>::max(),
+                  "The max payload size cannot fit into the indice type");
+
+    req0.indices[0] = MAX_SIZE;
+
+    CDataStream stream(SER_NETWORK, PROTOCOL_VERSION);
+    stream << req0;
+
+    BlockTransactionsRequest req1;
+    stream >> req1;
+    BOOST_CHECK_EQUAL(req0.indices.size(), req1.indices.size());
+    BOOST_CHECK_EQUAL(req0.indices[0], req1.indices[0]);
+
+    req0.indices[0] += 1;
+    stream << req0;
+    BlockTransactionsRequest req2;
+    BOOST_CHECK_EXCEPTION(stream >> req2, std::ios_base::failure,
+                          HasReason("ReadCompactSize(): size too large"));
+}
+
+BOOST_AUTO_TEST_CASE(TransactionsRequestDeserializationOverflowTest) {
+    // Any set of index deltas that starts with N values that sum to
+    // (0x100000000 - N) causes the edge-case overflow that was originally not
+    // checked for. Such a request cannot be created by serializing a real
+    // BlockTransactionsRequest due to the overflow, so here we'll serialize
+    // from raw deltas. This can only occur if MAX_SIZE is greater than the
+    // maximum value for that the indice type can handle.
+    BlockTransactionsRequest req0;
+    req0.blockhash = BlockHash(InsecureRand256());
+    req0.indices.resize(3);
+
+    using indiceType = decltype(req0.indices)::value_type;
+    static_assert(std::is_same<indiceType, uint32_t>::value,
+                  "This test expects the indice type to be an uint32_t");
+
+    req0.indices[0] = 0x7000;
+    req0.indices[1] = 0x100000000 - 0x7000 - 2;
+    req0.indices[2] = 0;
+    CDataStream stream(SER_NETWORK, PROTOCOL_VERSION);
+    stream << req0.blockhash;
+    WriteCompactSize(stream, req0.indices.size());
+    WriteCompactSize(stream, req0.indices[0]);
+    WriteCompactSize(stream, req0.indices[1]);
+    WriteCompactSize(stream, req0.indices[2]);
+
+    BlockTransactionsRequest req1;
+    // If MAX_SIZE is the limiting factor, the deserialization should throw.
+    // Otherwise make sure that the overflow edge-case is under control.
+    BOOST_CHECK_EXCEPTION(stream >> req1, std::ios_base::failure,
+                          HasReason((MAX_SIZE < req0.indices[1])
+                                        ? "ReadCompactSize(): size too large"
+                                        : "indices overflowed 32 bits"));
 }
 
 BOOST_AUTO_TEST_SUITE_END()

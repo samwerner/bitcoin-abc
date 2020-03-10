@@ -1,6 +1,6 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
 // Copyright (c) 2009-2016 The Bitcoin Core developers
-// Copyright (c) 2017-2018 The Bitcoin developers
+// Copyright (c) 2017-2020 The Bitcoin developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -22,20 +22,16 @@ enum {
     SCRIPT_VERIFY_STRICTENC = (1U << 1),
 
     // Passing a non-strict-DER signature to a checksig operation causes script
-    // failure (softfork safe, BIP62 rule 1)
+    // failure (BIP62 rule 1)
     SCRIPT_VERIFY_DERSIG = (1U << 2),
 
     // Passing a non-strict-DER signature or one with S > order/2 to a checksig
     // operation causes script failure
-    // (softfork safe, BIP62 rule 5).
+    // (BIP62 rule 5).
     SCRIPT_VERIFY_LOW_S = (1U << 3),
 
-    // verify dummy stack item consumed by CHECKMULTISIG is of zero-length
-    // (softfork safe, BIP62 rule 7).
-    SCRIPT_VERIFY_NULLDUMMY = (1U << 4),
-
     // Using a non-push operator in the scriptSig causes script failure
-    // (softfork safe, BIP62 rule 2).
+    // (BIP62 rule 2).
     SCRIPT_VERIFY_SIGPUSHONLY = (1U << 5),
 
     // Require minimal encodings for all push operations (OP_0... OP_16,
@@ -44,7 +40,6 @@ enum {
     // push causes the script to fail (BIP62 rule 3). In addition, whenever a
     // stack element is interpreted as a number, it must be of minimal length
     // (BIP62 rule 4).
-    // (softfork safe)
     SCRIPT_VERIFY_MINIMALDATA = (1U << 6),
 
     // Discourage use of NOPs reserved for upgrades (NOP1-10)
@@ -62,8 +57,8 @@ enum {
     // remain, and when interpreted as a boolean, it must be true" to "Exactly
     // one stack element must remain, and when interpreted as a boolean, it must
     // be true".
-    // (softfork safe, BIP62 rule 6)
-    // Note: CLEANSTACK should never be used without P2SH or WITNESS.
+    // (BIP62 rule 6)
+    // Note: CLEANSTACK should never be used without P2SH.
     // Note: The Segwit Recovery feature is an exception to CLEANSTACK
     SCRIPT_VERIFY_CLEANSTACK = (1U << 8),
 
@@ -85,10 +80,6 @@ enum {
     //
     SCRIPT_VERIFY_NULLFAIL = (1U << 14),
 
-    // Public keys in scripts must be compressed
-    //
-    SCRIPT_VERIFY_COMPRESSED_PUBKEYTYPE = (1U << 15),
-
     // Do we accept signature using SIGHASH_FORKID
     //
     SCRIPT_ENABLE_SIGHASH_FORKID = (1U << 16),
@@ -98,9 +89,8 @@ enum {
     SCRIPT_ENABLE_REPLAY_PROTECTION = (1U << 17),
 
     // Count sigops for OP_CHECKDATASIG and variant. The interpreter treats
-    // OP_CHECKDATASIG(VERIFY) as always valid, this flag only affects sigops
-    // counting.
-    //
+    // OP_CHECKDATASIG(VERIFY) as always valid. This flag only affects sigops
+    // counting, and will be removed during cleanup of the SigChecks upgrade.
     SCRIPT_VERIFY_CHECKDATASIG_SIGOPS = (1U << 18),
 
     // The exception to CLEANSTACK and P2SH for the recovery of coins sent
@@ -110,6 +100,26 @@ enum {
     // Whether to allow new OP_CHECKMULTISIG logic to trigger. (new multisig
     // logic verifies faster, and only allows Schnorr signatures)
     SCRIPT_ENABLE_SCHNORR_MULTISIG = (1U << 21),
+
+    // Require the number of sigchecks in an input to satisfy a specific
+    // bound, defined by scriptSig length.
+    // Note: The Segwit Recovery feature is a (currently moot) exception to
+    // VERIFY_INPUT_SIGCHECKS
+    SCRIPT_VERIFY_INPUT_SIGCHECKS = (1U << 22),
+
+    // Whether the new OP_REVERSEBYTES opcode can be used.
+    SCRIPT_ENABLE_OP_REVERSEBYTES = (1U << 23),
+
+    // Setting this flag zeroes sigops counting and thus results in the removal
+    // of all sigop limits. This flag only affects sigops counting, and will be
+    // removed during cleanup of the SigChecks upgrade.
+    SCRIPT_ZERO_SIGOPS = (1U << 30),
+
+    // A utility flag to decide whether VerifyScript should output the correct
+    // sigchecks value or to report zero.
+    // This has no effect on script success / failure, and will be removed
+    // after cleanup of the SigChecks upgrade.
+    SCRIPT_REPORT_SIGCHECKS = (1U << 31),
 };
 
 #endif // BITCOIN_SCRIPT_SCRIPT_FLAGS_H

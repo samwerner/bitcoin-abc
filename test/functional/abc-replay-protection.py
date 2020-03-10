@@ -14,7 +14,7 @@ import time
 from test_framework.blocktools import (
     create_block,
     create_coinbase,
-    create_transaction,
+    create_tx_with_script,
     make_conform_to_ctor,
 )
 from test_framework.key import CECKey
@@ -64,7 +64,7 @@ class ReplayProtectionTest(BitcoinTestFramework):
                             "-replayprotectionactivationtime={}".format(REPLAY_PROTECTION_START_TIME)]]
 
     def next_block(self, number):
-        if self.tip == None:
+        if self.tip is None:
             base_block_hash = self.genesis_hash
             block_time = int(time.time()) + 1
         else:
@@ -152,19 +152,19 @@ class ReplayProtectionTest(BitcoinTestFramework):
         def create_fund_and_spend_tx(spend, forkvalue=0):
             # Fund transaction
             script = CScript([public_key, OP_CHECKSIG])
-            txfund = create_transaction(
-                spend.tx, spend.n, b'', 50 * COIN, script)
+            txfund = create_tx_with_script(
+                spend.tx, spend.n, b'', 50 * COIN - 1000, script)
             txfund.rehash()
 
             # Spend transaction
             txspend = CTransaction()
-            txspend.vout.append(CTxOut(50 * COIN - 1000, CScript([OP_TRUE])))
+            txspend.vout.append(CTxOut(50 * COIN - 2000, CScript([OP_TRUE])))
             txspend.vin.append(CTxIn(COutPoint(txfund.sha256, 0), b''))
 
             # Sign the transaction
             sighashtype = (forkvalue << 8) | SIGHASH_ALL | SIGHASH_FORKID
             sighash = SignatureHashForkId(
-                script, txspend, 0, sighashtype, 50 * COIN)
+                script, txspend, 0, sighashtype, 50 * COIN - 1000)
             sig = private_key.sign(sighash) + \
                 bytes(bytearray([SIGHASH_ALL | SIGHASH_FORKID]))
             txspend.vin[0].scriptSig = CScript([sig])
@@ -174,7 +174,7 @@ class ReplayProtectionTest(BitcoinTestFramework):
 
         def send_transaction_to_mempool(tx):
             tx_id = node.sendrawtransaction(ToHex(tx))
-            assert(tx_id in set(node.getrawmempool()))
+            assert tx_id in set(node.getrawmempool())
             return tx_id
 
         # Before the fork, no replay protection required to get in the mempool.
@@ -215,8 +215,9 @@ class ReplayProtectionTest(BitcoinTestFramework):
         node.p2p.send_blocks_and_test(activation_blocks, node)
 
         # Check we are just before the activation time
-        assert_equal(node.getblockheader(node.getbestblockhash())['mediantime'],
-                     REPLAY_PROTECTION_START_TIME - 1)
+        assert_equal(
+            node.getblockchaininfo()['mediantime'],
+            REPLAY_PROTECTION_START_TIME - 1)
 
         # We are just before the fork, replay protected txns still are rejected
         assert_raises_rpc_error(-26, RPC_INVALID_SIGNATURE_ERROR,
@@ -241,12 +242,13 @@ class ReplayProtectionTest(BitcoinTestFramework):
         node.p2p.send_blocks_and_test([self.tip], node)
 
         # Check we just activated the replay protection
-        assert_equal(node.getblockheader(node.getbestblockhash())['mediantime'],
-                     REPLAY_PROTECTION_START_TIME)
+        assert_equal(
+            node.getblockchaininfo()['mediantime'],
+            REPLAY_PROTECTION_START_TIME)
 
         # Non replay protected transactions are not valid anymore,
         # so they should be removed from the mempool.
-        assert(tx_id not in set(node.getrawmempool()))
+        assert tx_id not in set(node.getrawmempool())
 
         # Good old transactions are now invalid.
         send_transaction_to_mempool(txns[0])
@@ -279,11 +281,11 @@ class ReplayProtectionTest(BitcoinTestFramework):
             elif txid == replay_tx1_id:
                 found_id1 = True
 
-        assert(found_id0 and found_id1)
+        assert found_id0 and found_id1
 
         # And the mempool is still in good shape.
-        assert(replay_tx0_id in set(node.getrawmempool()))
-        assert(replay_tx1_id in set(node.getrawmempool()))
+        assert replay_tx0_id in set(node.getrawmempool())
+        assert replay_tx1_id in set(node.getrawmempool())
 
         # They also can also be mined
         block(5)
@@ -293,23 +295,23 @@ class ReplayProtectionTest(BitcoinTestFramework):
         # Ok, now we check if a reorg work properly across the activation.
         postforkblockid = node.getbestblockhash()
         node.invalidateblock(postforkblockid)
-        assert(replay_tx0_id in set(node.getrawmempool()))
-        assert(replay_tx1_id in set(node.getrawmempool()))
+        assert replay_tx0_id in set(node.getrawmempool())
+        assert replay_tx1_id in set(node.getrawmempool())
 
         # Deactivating replay protection.
         forkblockid = node.getbestblockhash()
         node.invalidateblock(forkblockid)
         # The funding tx is not evicted from the mempool, since it's valid in
         # both sides of the fork
-        assert(replay_tx0_id in set(node.getrawmempool()))
-        assert(replay_tx1_id not in set(node.getrawmempool()))
+        assert replay_tx0_id in set(node.getrawmempool())
+        assert replay_tx1_id not in set(node.getrawmempool())
 
         # Check that we also do it properly on deeper reorg.
         node.reconsiderblock(forkblockid)
         node.reconsiderblock(postforkblockid)
         node.invalidateblock(forkblockid)
-        assert(replay_tx0_id in set(node.getrawmempool()))
-        assert(replay_tx1_id not in set(node.getrawmempool()))
+        assert replay_tx0_id in set(node.getrawmempool())
+        assert replay_tx1_id not in set(node.getrawmempool())
 
 
 if __name__ == '__main__':

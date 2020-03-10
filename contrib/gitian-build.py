@@ -62,8 +62,8 @@ def build():
     output_dir_src = '../' + base_output_dir + '/src'
     if args.linux:
         print('\nCompiling ' + args.version + ' Linux')
-        subprocess.check_call(['bin/gbuild', '-j', args.jobs, '-m', args.memory, '--commit', 'bitcoin='+args.commit,
-                               '--url', 'bitcoin='+args.url, '../bitcoin-abc/contrib/gitian-descriptors/gitian-linux.yml'])
+        subprocess.check_call(['bin/gbuild', '-j', args.jobs, '-m', args.memory, '--commit', 'bitcoin=' + args.commit,
+                               '--url', 'bitcoin=' + args.url, '../bitcoin-abc/contrib/gitian-descriptors/gitian-linux.yml'])
         subprocess.check_call(['bin/gsign', '-p', args.sign_prog, '--signer', args.signer, '--release', args.version +
                                '-linux', '--destination', '../gitian.sigs/', '../bitcoin-abc/contrib/gitian-descriptors/gitian-linux.yml'])
         output_dir_linux = '../' + base_output_dir + '/linux'
@@ -77,8 +77,8 @@ def build():
 
     if args.windows:
         print('\nCompiling ' + args.version + ' Windows')
-        subprocess.check_call(['bin/gbuild', '-j', args.jobs, '-m', args.memory, '--commit', 'bitcoin='+args.commit,
-                               '--url', 'bitcoin='+args.url, '../bitcoin-abc/contrib/gitian-descriptors/gitian-win.yml'])
+        subprocess.check_call(['bin/gbuild', '-j', args.jobs, '-m', args.memory, '--commit', 'bitcoin=' + args.commit,
+                               '--url', 'bitcoin=' + args.url, '../bitcoin-abc/contrib/gitian-descriptors/gitian-win.yml'])
         subprocess.check_call(['bin/gsign', '-p', args.sign_prog, '--signer', args.signer, '--release', args.version +
                                '-win-unsigned', '--destination', '../gitian.sigs/', '../bitcoin-abc/contrib/gitian-descriptors/gitian-win.yml'])
         output_dir_win = '../' + base_output_dir + '/win'
@@ -94,8 +94,8 @@ def build():
 
     if args.macos:
         print('\nCompiling ' + args.version + ' MacOS')
-        subprocess.check_call(['bin/gbuild', '-j', args.jobs, '-m', args.memory, '--commit', 'bitcoin='+args.commit,
-                               '--url', 'bitcoin='+args.url, '../bitcoin-abc/contrib/gitian-descriptors/gitian-osx.yml'])
+        subprocess.check_call(['bin/gbuild', '-j', args.jobs, '-m', args.memory, '--commit', 'bitcoin=' + args.commit,
+                               '--url', 'bitcoin=' + args.url, '../bitcoin-abc/contrib/gitian-descriptors/gitian-osx.yml'])
         subprocess.check_call(['bin/gsign', '-p', args.sign_prog, '--signer', args.signer, '--release', args.version +
                                '-osx-unsigned', '--destination', '../gitian.sigs/', '../bitcoin-abc/contrib/gitian-descriptors/gitian-osx.yml'])
         output_dir_osx = '../' + base_output_dir + '/osx'
@@ -112,16 +112,16 @@ def build():
     os.chdir(workdir)
 
     if args.commit_files:
-        print('\nCommitting '+args.version+' Unsigned Sigs\n')
+        print('\nCommitting ' + args.version + ' Unsigned Sigs\n')
         os.chdir('gitian.sigs')
         subprocess.check_call(
-            ['git', 'add', args.version+'-linux/'+args.signer])
+            ['git', 'add', args.version + '-linux/' + args.signer])
         subprocess.check_call(
-            ['git', 'add', args.version+'-win-unsigned/'+args.signer])
+            ['git', 'add', args.version + '-win-unsigned/' + args.signer])
         subprocess.check_call(
-            ['git', 'add', args.version+'-osx-unsigned/'+args.signer])
+            ['git', 'add', args.version + '-osx-unsigned/' + args.signer])
         subprocess.check_call(
-            ['git', 'commit', '-m', 'Add '+args.version+' unsigned sigs for '+args.signer])
+            ['git', 'commit', '-m', 'Add ' + args.version + ' unsigned sigs for ' + args.signer])
         os.chdir(workdir)
 
 
@@ -133,37 +133,37 @@ def sign():
         print('\nSigning ' + args.version + ' Windows')
         subprocess.check_call('cp inputs/bitcoin-' + args.version +
                               '-win-unsigned.tar.gz inputs/bitcoin-win-unsigned.tar.gz', shell=True)
-        subprocess.check_call(['bin/gbuild', '-i', '--commit', 'signature='+args.commit,
+        subprocess.check_call(['bin/gbuild', '-i', '--commit', 'signature=' + args.commit,
                                '../bitcoin-abc/contrib/gitian-descriptors/gitian-win-signer.yml'])
-        subprocess.check_call(['bin/gsign', '-p', args.sign_prog, '--signer', args.signer, '--release', args.version+'-win-signed',
+        subprocess.check_call(['bin/gsign', '-p', args.sign_prog, '--signer', args.signer, '--release', args.version + '-win-signed',
                                '--destination', '../gitian.sigs/', '../bitcoin-abc/contrib/gitian-descriptors/gitian-win-signer.yml'])
         subprocess.check_call(
-            'mv build/out/bitcoin-*win64-setup.exe ../bitcoin-binaries/'+args.version, shell=True)
+            'mv build/out/bitcoin-*win64-setup.exe ../bitcoin-binaries/' + args.version, shell=True)
         subprocess.check_call(
-            'mv build/out/bitcoin-*win32-setup.exe ../bitcoin-binaries/'+args.version, shell=True)
+            'mv build/out/bitcoin-*win32-setup.exe ../bitcoin-binaries/' + args.version, shell=True)
 
     if args.macos:
         print('\nSigning ' + args.version + ' MacOS')
         subprocess.check_call('cp inputs/bitcoin-' + args.version +
                               '-osx-unsigned.tar.gz inputs/bitcoin-osx-unsigned.tar.gz', shell=True)
-        subprocess.check_call(['bin/gbuild', '-i', '--commit', 'signature='+args.commit,
+        subprocess.check_call(['bin/gbuild', '-i', '--commit', 'signature=' + args.commit,
                                '../bitcoin-abc/contrib/gitian-descriptors/gitian-osx-signer.yml'])
-        subprocess.check_call(['bin/gsign', '-p', args.sign_prog, '--signer', args.signer, '--release', args.version+'-osx-signed',
+        subprocess.check_call(['bin/gsign', '-p', args.sign_prog, '--signer', args.signer, '--release', args.version + '-osx-signed',
                                '--destination', '../gitian.sigs/', '../bitcoin-abc/contrib/gitian-descriptors/gitian-osx-signer.yml'])
         subprocess.check_call('mv build/out/bitcoin-osx-signed.dmg ../bitcoin-binaries/' +
-                              args.version+'/bitcoin-'+args.version+'-osx.dmg', shell=True)
+                              args.version + '/bitcoin-' + args.version + '-osx.dmg', shell=True)
 
     os.chdir(workdir)
 
     if args.commit_files:
-        print('\nCommitting '+args.version+' Signed Sigs\n')
+        print('\nCommitting ' + args.version + ' Signed Sigs\n')
         os.chdir('gitian.sigs')
         subprocess.check_call(
-            ['git', 'add', args.version+'-win-signed/'+args.signer])
+            ['git', 'add', args.version + '-win-signed/' + args.signer])
         subprocess.check_call(
-            ['git', 'add', args.version+'-osx-signed/'+args.signer])
+            ['git', 'add', args.version + '-osx-signed/' + args.signer])
         subprocess.check_call(['git', 'commit', '-a', '-m', 'Add ' +
-                               args.version+' signed binary sigs for '+args.signer])
+                               args.version + ' signed binary sigs for ' + args.signer])
         os.chdir(workdir)
 
 
@@ -171,19 +171,19 @@ def verify():
     global args, workdir
     os.chdir('gitian-builder')
 
-    print('\nVerifying v'+args.version+' Linux\n')
+    print('\nVerifying v' + args.version + ' Linux\n')
     subprocess.check_call(['bin/gverify', '-v', '-d', '../gitian.sigs/', '-r', args.version +
                            '-linux', '../bitcoin-abc/contrib/gitian-descriptors/gitian-linux.yml'])
-    print('\nVerifying v'+args.version+' Windows\n')
+    print('\nVerifying v' + args.version + ' Windows\n')
     subprocess.check_call(['bin/gverify', '-v', '-d', '../gitian.sigs/', '-r', args.version +
                            '-win-unsigned', '../bitcoin-abc/contrib/gitian-descriptors/gitian-win.yml'])
-    print('\nVerifying v'+args.version+' MacOS\n')
+    print('\nVerifying v' + args.version + ' MacOS\n')
     subprocess.check_call(['bin/gverify', '-v', '-d', '../gitian.sigs/', '-r', args.version +
                            '-osx-unsigned', '../bitcoin-abc/contrib/gitian-descriptors/gitian-osx.yml'])
-    print('\nVerifying v'+args.version+' Signed Windows\n')
+    print('\nVerifying v' + args.version + ' Signed Windows\n')
     subprocess.check_call(['bin/gverify', '-v', '-d', '../gitian.sigs/', '-r', args.version +
                            '-win-signed', '../bitcoin-abc/contrib/gitian-descriptors/gitian-win-signer.yml'])
-    print('\nVerifying v'+args.version+' Signed MacOS\n')
+    print('\nVerifying v' + args.version + ' Signed MacOS\n')
     subprocess.check_call(['bin/gverify', '-v', '-d', '../gitian.sigs/', '-r', args.version +
                            '-osx-signed', '../bitcoin-abc/contrib/gitian-descriptors/gitian-osx-signer.yml'])
 
@@ -249,30 +249,32 @@ def main():
 
     args.sign_prog = 'true' if args.detach_sign else 'gpg --detach-sign'
 
-    # Set environment variable USE_LXC or USE_DOCKER, let gitian-builder know that we use lxc or docker
+    # Set environment variable USE_LXC or USE_DOCKER, let gitian-builder know
+    # that we use lxc or docker
     if args.docker:
         os.environ['USE_DOCKER'] = '1'
     elif not args.kvm:
         os.environ['USE_LXC'] = '1'
-        if not 'GITIAN_HOST_IP' in os.environ.keys():
+        if 'GITIAN_HOST_IP' not in os.environ.keys():
             os.environ['GITIAN_HOST_IP'] = '10.0.3.1'
-        if not 'LXC_GUEST_IP' in os.environ.keys():
+        if 'LXC_GUEST_IP' not in os.environ.keys():
             os.environ['LXC_GUEST_IP'] = '10.0.3.5'
 
     # Disable for MacOS if no SDK found
-    if args.macos and not os.path.isfile('gitian-builder/inputs/MacOSX10.11.sdk.tar.gz'):
+    if args.macos and not os.path.isfile(
+            'gitian-builder/inputs/MacOSX10.11.sdk.tar.gz'):
         print('Cannot build for MacOS, SDK does not exist. Will build for other OSes')
         args.macos = False
 
     script_name = os.path.basename(sys.argv[0])
     # Signer and version shouldn't be empty
     if args.signer == '':
-        print(script_name+': Missing signer.')
-        print('Try '+script_name+' --help for more information')
+        print(script_name + ': Missing signer.')
+        print('Try ' + script_name + ' --help for more information')
         exit(1)
     if args.version == '':
-        print(script_name+': Missing version.')
-        print('Try '+script_name+' --help for more information')
+        print(script_name + ': Missing version.')
+        print('Try ' + script_name + ' --help for more information')
         exit(1)
 
     # Add leading 'v' for tags
@@ -286,10 +288,10 @@ def main():
     os.chdir('bitcoin-abc')
     if args.pull:
         subprocess.check_call(
-            ['git', 'fetch', args.url, 'refs/pull/'+args.version+'/merge'])
+            ['git', 'fetch', args.url, 'refs/pull/' + args.version + '/merge'])
         os.chdir('../gitian-builder/inputs/bitcoin')
         subprocess.check_call(
-            ['git', 'fetch', args.url, 'refs/pull/'+args.version+'/merge'])
+            ['git', 'fetch', args.url, 'refs/pull/' + args.version + '/merge'])
         args.commit = subprocess.check_output(
             ['git', 'show', '-s', '--format=%H', 'FETCH_HEAD'], universal_newlines=True, encoding='utf8').strip()
         args.version = 'pull-' + args.version

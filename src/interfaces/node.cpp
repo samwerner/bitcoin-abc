@@ -11,6 +11,7 @@
 #include <chainparams.h>
 #include <config.h>
 #include <init.h>
+#include <interfaces/chain.h>
 #include <interfaces/handler.h>
 #include <interfaces/wallet.h>
 #include <net.h>
@@ -22,6 +23,7 @@
 #include <primitives/block.h>
 #include <rpc/server.h>
 #include <scheduler.h>
+#include <shutdown.h>
 #include <sync.h>
 #include <txmempool.h>
 #include <ui_interface.h>
@@ -52,6 +54,8 @@ namespace interfaces {
 namespace {
 
     class NodeImpl : public Node {
+    public:
+        NodeImpl() { m_interfaces.chain = MakeChain(); }
         bool parseParameters(int argc, const char *const argv[],
                              std::string &error) override {
             return gArgs.ParseParameters(argc, argv, error);
@@ -82,11 +86,12 @@ namespace {
         bool
         appInitMain(Config &config, RPCServer &rpcServer,
                     HTTPRPCRequestProcessor &httpRPCRequestProcessor) override {
-            return AppInitMain(config, rpcServer, httpRPCRequestProcessor);
+            return AppInitMain(config, rpcServer, httpRPCRequestProcessor,
+                               m_interfaces);
         }
         void appShutdown() override {
             Interrupt();
-            Shutdown();
+            Shutdown(m_interfaces);
         }
         void startShutdown() override { StartShutdown(); }
         bool shutdownRequested() override { return ShutdownRequested(); }
@@ -186,12 +191,12 @@ namespace {
         }
         int getNumBlocks() override {
             LOCK(::cs_main);
-            return ::chainActive.Height();
+            return ::ChainActive().Height();
         }
         int64_t getLastBlockTime() override {
             LOCK(::cs_main);
-            if (::chainActive.Tip()) {
-                return ::chainActive.Tip()->GetBlockTime();
+            if (::ChainActive().Tip()) {
+                return ::ChainActive().Tip()->GetBlockTime();
             }
             // Genesis block's time of current network
             return Params().GenesisBlock().GetBlockTime();
@@ -200,7 +205,7 @@ namespace {
             const CBlockIndex *tip;
             {
                 LOCK(::cs_main);
-                tip = ::chainActive.Tip();
+                tip = ::ChainActive().Tip();
             }
             return GuessVerificationProgress(Params().TxData(), tip);
         }
@@ -255,20 +260,20 @@ namespace {
 #endif
         }
         std::unique_ptr<Handler> handleInitMessage(InitMessageFn fn) override {
-            return MakeHandler(::uiInterface.InitMessage.connect(fn));
+            return MakeHandler(::uiInterface.InitMessage_connect(fn));
         }
         std::unique_ptr<Handler> handleMessageBox(MessageBoxFn fn) override {
-            return MakeHandler(::uiInterface.ThreadSafeMessageBox.connect(fn));
+            return MakeHandler(::uiInterface.ThreadSafeMessageBox_connect(fn));
         }
         std::unique_ptr<Handler> handleQuestion(QuestionFn fn) override {
-            return MakeHandler(::uiInterface.ThreadSafeQuestion.connect(fn));
+            return MakeHandler(::uiInterface.ThreadSafeQuestion_connect(fn));
         }
         std::unique_ptr<Handler>
         handleShowProgress(ShowProgressFn fn) override {
-            return MakeHandler(::uiInterface.ShowProgress.connect(fn));
+            return MakeHandler(::uiInterface.ShowProgress_connect(fn));
         }
         std::unique_ptr<Handler> handleLoadWallet(LoadWalletFn fn) override {
-            CHECK_WALLET(return MakeHandler(::uiInterface.LoadWallet.connect(
+            CHECK_WALLET(return MakeHandler(::uiInterface.LoadWallet_connect(
                 [fn](std::shared_ptr<CWallet> wallet) {
                     fn(MakeWallet(wallet));
                 })));
@@ -276,24 +281,24 @@ namespace {
         std::unique_ptr<Handler> handleNotifyNumConnectionsChanged(
             NotifyNumConnectionsChangedFn fn) override {
             return MakeHandler(
-                ::uiInterface.NotifyNumConnectionsChanged.connect(fn));
+                ::uiInterface.NotifyNumConnectionsChanged_connect(fn));
         }
         std::unique_ptr<Handler> handleNotifyNetworkActiveChanged(
             NotifyNetworkActiveChangedFn fn) override {
             return MakeHandler(
-                ::uiInterface.NotifyNetworkActiveChanged.connect(fn));
+                ::uiInterface.NotifyNetworkActiveChanged_connect(fn));
         }
         std::unique_ptr<Handler>
         handleNotifyAlertChanged(NotifyAlertChangedFn fn) override {
-            return MakeHandler(::uiInterface.NotifyAlertChanged.connect(fn));
+            return MakeHandler(::uiInterface.NotifyAlertChanged_connect(fn));
         }
         std::unique_ptr<Handler>
         handleBannedListChanged(BannedListChangedFn fn) override {
-            return MakeHandler(::uiInterface.BannedListChanged.connect(fn));
+            return MakeHandler(::uiInterface.BannedListChanged_connect(fn));
         }
         std::unique_ptr<Handler>
         handleNotifyBlockTip(NotifyBlockTipFn fn) override {
-            return MakeHandler(::uiInterface.NotifyBlockTip.connect(
+            return MakeHandler(::uiInterface.NotifyBlockTip_connect(
                 [fn](bool initial_download, const CBlockIndex *block) {
                     fn(initial_download, block->nHeight, block->GetBlockTime(),
                        GuessVerificationProgress(Params().TxData(), block));
@@ -301,12 +306,13 @@ namespace {
         }
         std::unique_ptr<Handler>
         handleNotifyHeaderTip(NotifyHeaderTipFn fn) override {
-            return MakeHandler(::uiInterface.NotifyHeaderTip.connect(
+            return MakeHandler(::uiInterface.NotifyHeaderTip_connect(
                 [fn](bool initial_download, const CBlockIndex *block) {
                     fn(initial_download, block->nHeight, block->GetBlockTime(),
                        GuessVerificationProgress(Params().TxData(), block));
                 }));
         }
+        InitInterfaces m_interfaces;
     };
 } // namespace
 

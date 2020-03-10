@@ -1,9 +1,11 @@
 #include <qt/test/util.h>
 #include <qt/test/wallettests.h>
 
+#include <base58.h>
 #include <cashaddrenc.h>
 #include <chain.h>
 #include <chainparams.h>
+#include <interfaces/chain.h>
 #include <interfaces/node.h>
 #include <key_io.h>
 #include <qt/bitcoinamountfield.h>
@@ -31,6 +33,8 @@
 #include <QTextEdit>
 #include <QTimer>
 #include <QVBoxLayout>
+
+#include <memory>
 
 namespace {
 //! Press "Yes" or "Cancel" buttons in modal send confirmation dialog.
@@ -107,8 +111,11 @@ void TestGUI() {
         test.CreateAndProcessBlock(
             {}, GetScriptForRawPubKey(test.coinbaseKey.GetPubKey()));
     }
+
+    auto chain = interfaces::MakeChain();
     std::shared_ptr<CWallet> wallet = std::make_shared<CWallet>(
-        Params(), "mock", WalletDatabase::CreateMock());
+        Params(), *chain, WalletLocation(), WalletDatabase::CreateMock());
+
     bool firstRun;
     wallet->LoadWallet(firstRun);
     {
@@ -120,10 +127,10 @@ void TestGUI() {
         wallet->AddKeyPubKey(test.coinbaseKey, test.coinbaseKey.GetPubKey());
     }
     {
-        LOCK(cs_main);
+        auto locked_chain = wallet->chain().lock();
         WalletRescanReserver reserver(wallet.get());
         reserver.reserve();
-        wallet->ScanForWalletTransactions(chainActive.Genesis(), nullptr,
+        wallet->ScanForWalletTransactions(::ChainActive().Genesis(), nullptr,
                                           reserver, true);
     }
     wallet->SetBroadcastTransactions(true);

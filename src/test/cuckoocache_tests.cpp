@@ -12,28 +12,103 @@
 #include <boost/test/unit_test.hpp>
 #include <boost/thread/shared_mutex.hpp>
 
-/** Test Suite for CuckooCache
+/**
+ * Test Suite for CuckooCache
  *
- *  1) All tests should have a deterministic result (using insecure rand
- *  with deterministic seeds)
- *  2) Some test methods are templated to allow for easier testing
- *  against new versions / comparing
- *  3) Results should be treated as a regression test, i.e., did the behavior
- *  change significantly from what was expected. This can be OK, depending on
- *  the nature of the change, but requires updating the tests to reflect the new
- *  expected behavior. For example improving the hit rate may cause some tests
- *  using BOOST_CHECK_CLOSE to fail.
+ * 1. All tests should have a deterministic result (using insecure rand
+ * with deterministic seeds)
+ * 2. Some test methods are templated to allow for easier testing
+ * against new versions / comparing
+ * 3. Results should be treated as a regression test, i.e., did the behavior
+ * change significantly from what was expected. This can be OK, depending on
+ * the nature of the change, but requires updating the tests to reflect the new
+ * expected behavior. For example improving the hit rate may cause some tests
+ * using BOOST_CHECK_CLOSE to fail.
  */
-BOOST_AUTO_TEST_SUITE(cuckoocache_tests);
+BOOST_AUTO_TEST_SUITE(cuckoocache_tests)
+
+/**
+ * Example key/value element. The key is 28 bytes long and the value 4, for a
+ * total of 32 bytes.
+ */
+struct TestMapElement {
+    struct KeyType {
+        std::array<uint8_t, 28> data;
+
+        KeyType() = default;
+        KeyType(const KeyType &rhs) = default;
+
+        KeyType(const uint256 &k) {
+            std::copy(k.begin() + 4, k.end(), data.begin());
+        }
+
+        bool operator==(const KeyType &rhs) const { return rhs.data == data; }
+    };
+
+private:
+    KeyType key;
+    uint32_t value;
+
+public:
+    TestMapElement() = default;
+    TestMapElement(const TestMapElement &rhs) = default;
+
+    TestMapElement(const uint256 &data)
+        : TestMapElement(data, data.GetUint64(0)) {}
+    TestMapElement(const KeyType &keyIn, uint32_t valueIn)
+        : key(keyIn), value(valueIn) {}
+
+    const KeyType &getKey() const { return key; }
+    uint32_t getValue() const { return value; }
+
+    class CacheHasher {
+    public:
+        template <uint8_t hash_select>
+        uint32_t operator()(const KeyType &k) const {
+            static_assert(hash_select < 8, "only has 8 hashes available.");
+
+            const auto &d = k.data;
+
+            uint32_t u;
+            if (hash_select < 7) {
+                std::memcpy(&u, d.begin() + 4 * hash_select, 4);
+            } else {
+                // We are required to produce 8 subhashes but all key bytes have
+                // been used once already. So, we grab a mix of bits from each
+                // of the other blobs. We try to ensure more entropy on the
+                // higher bits, as these are what primarily get used to
+                // determine the index.
+                u = (uint32_t(d[0] & 0x07) << 29) +
+                    (uint32_t(d[4] & 0x07) << 26) +
+                    (uint32_t(d[8] & 0x0f) << 22) +
+                    (uint32_t(d[16] & 0x3f) << 16) +
+                    (uint32_t(d[20] & 0xff) << 8) +
+                    (uint32_t(d[24] & 0xff) << 0);
+            }
+            return u;
+        }
+    };
+
+    friend class CuckooCache::cache<TestMapElement, CacheHasher>;
+};
+
+static_assert(sizeof(TestMapElement) == 32, "TestMapElement must be 32 bytes");
+
+// For convenience.
+using CuckooCacheSet =
+    CuckooCache::cache<CuckooCache::KeyOnly<uint256>, SignatureCacheHasher>;
+using CuckooCacheMap =
+    CuckooCache::cache<TestMapElement, TestMapElement::CacheHasher>;
+using TestMapKey = TestMapElement::KeyType;
 
 /**
  * Test that no values not inserted into the cache are read out of it.
  *
- * There are no repeats in the first 200000 insecure_GetRandHash calls
+ * There are no repeats in the first 400000 insecure_GetRandHash calls
  */
 BOOST_AUTO_TEST_CASE(test_cuckoocache_no_fakes) {
     SeedInsecureRand(true);
-    CuckooCache::cache<uint256, SignatureCacheHasher> cc{};
+    CuckooCacheSet cc{};
     size_t megabytes = 4;
     cc.setup_bytes(megabytes << 20);
     for (int x = 0; x < 100000; ++x) {
@@ -41,6 +116,15 @@ BOOST_AUTO_TEST_CASE(test_cuckoocache_no_fakes) {
     }
     for (int x = 0; x < 100000; ++x) {
         BOOST_CHECK(!cc.contains(InsecureRand256(), false));
+    }
+
+    CuckooCacheMap cm{};
+    cm.setup_bytes(megabytes << 20);
+    for (int x = 0; x < 100000; ++x) {
+        cm.insert(TestMapElement(InsecureRand256()));
+    }
+    for (int x = 0; x < 100000; ++x) {
+        BOOST_CHECK(!cm.contains(TestMapKey(InsecureRand256()), false));
     }
 };
 
@@ -56,12 +140,9 @@ static double test_cache(size_t megabytes, double load) {
     size_t bytes = megabytes * (1 << 20);
     set.setup_bytes(bytes);
     uint32_t n_insert = static_cast<uint32_t>(load * (bytes / sizeof(uint256)));
-    hashes.resize(n_insert);
+    hashes.reserve(n_insert);
     for (uint32_t i = 0; i < n_insert; ++i) {
-        uint32_t *ptr = (uint32_t *)hashes[i].begin();
-        for (uint8_t j = 0; j < 8; ++j) {
-            *(ptr++) = InsecureRand32();
-        }
+        hashes.emplace_back(InsecureRand256());
     }
     /**
      * We make a copy of the hashes because future optimizations of the
@@ -82,16 +163,17 @@ static double test_cache(size_t megabytes, double load) {
     return hit_rate;
 }
 
-/** The normalized hit rate for a given load.
+/**
+ * The normalized hit rate for a given load.
  *
  * The semantics are a little confusing, so please see the below
  * explanation.
  *
  * Examples:
  *
- * 1) at load 0.5, we expect a perfect hit rate, so we multiply by
+ * 1. at load 0.5, we expect a perfect hit rate, so we multiply by
  * 1.0
- * 2) at load 2.0, we expect to see half the entries, so a perfect hit rate
+ * 2. at load 2.0, we expect to see half the entries, so a perfect hit rate
  * would be 0.5. Therefore, if we see a hit rate of 0.4, 0.4*2.0 = 0.8 is the
  * normalized hit rate.
  *
@@ -112,15 +194,20 @@ BOOST_AUTO_TEST_CASE(cuckoocache_hit_rate_ok) {
     double HitRateThresh = 0.98;
     size_t megabytes = 4;
     for (double load = 0.1; load < 2; load *= 2) {
-        double hits =
-            test_cache<CuckooCache::cache<uint256, SignatureCacheHasher>>(
-                megabytes, load);
+        double hits = test_cache<CuckooCacheSet>(megabytes, load);
+        BOOST_CHECK(normalize_hit_rate(hits, load) > HitRateThresh);
+    }
+
+    for (double load = 0.1; load < 2; load *= 2) {
+        double hits = test_cache<CuckooCacheMap>(megabytes, load);
         BOOST_CHECK(normalize_hit_rate(hits, load) > HitRateThresh);
     }
 }
 
-/** This helper checks that erased elements are preferentially inserted onto and
- * that the hit rate of "fresher" keys is reasonable*/
+/**
+ * This helper checks that erased elements are preferentially inserted onto and
+ * that the hit rate of "fresher" keys is reasonable.
+ */
 template <typename Cache> static void test_cache_erase(size_t megabytes) {
     double load = 1;
     SeedInsecureRand(true);
@@ -131,12 +218,10 @@ template <typename Cache> static void test_cache_erase(size_t megabytes) {
     uint32_t n_insert = static_cast<uint32_t>(load * (bytes / sizeof(uint256)));
     hashes.resize(n_insert);
     for (uint32_t i = 0; i < n_insert; ++i) {
-        uint32_t *ptr = (uint32_t *)hashes[i].begin();
-        for (uint8_t j = 0; j < 8; ++j) {
-            *(ptr++) = InsecureRand32();
-        }
+        hashes[i] = InsecureRand256();
     }
-    /** We make a copy of the hashes because future optimizations of the
+    /**
+     * We make a copy of the hashes because future optimizations of the
      * cuckoocache may overwrite the inserted element, so the test is
      * "future proofed".
      */
@@ -186,8 +271,8 @@ template <typename Cache> static void test_cache_erase(size_t megabytes) {
 
 BOOST_AUTO_TEST_CASE(cuckoocache_erase_ok) {
     size_t megabytes = 4;
-    test_cache_erase<CuckooCache::cache<uint256, SignatureCacheHasher>>(
-        megabytes);
+    test_cache_erase<CuckooCacheSet>(megabytes);
+    test_cache_erase<CuckooCacheMap>(megabytes);
 }
 
 template <typename Cache>
@@ -201,12 +286,10 @@ static void test_cache_erase_parallel(size_t megabytes) {
     uint32_t n_insert = static_cast<uint32_t>(load * (bytes / sizeof(uint256)));
     hashes.resize(n_insert);
     for (uint32_t i = 0; i < n_insert; ++i) {
-        uint32_t *ptr = (uint32_t *)hashes[i].begin();
-        for (uint8_t j = 0; j < 8; ++j) {
-            *(ptr++) = InsecureRand32();
-        }
+        hashes[i] = InsecureRand256();
     }
-    /** We make a copy of the hashes because future optimizations of the
+    /**
+     * We make a copy of the hashes because future optimizations of the
      * cuckoocache may overwrite the inserted element, so the test is
      * "future proofed".
      */
@@ -222,11 +305,12 @@ static void test_cache_erase_parallel(size_t megabytes) {
         }
     }
 
-    /** Spin up 3 threads to run contains with erase.
+    /**
+     * Spin up 3 threads to run contains with erase.
      */
     std::vector<std::thread> threads;
     /** Erase the first quarter */
-    for (uint32_t x = 0; x < 3; ++x)
+    for (uint32_t x = 0; x < 3; ++x) {
         /** Each thread is emplaced with x copy-by-value */
         threads.emplace_back([&, x] {
             boost::shared_lock<boost::shared_mutex> l(mtx);
@@ -237,6 +321,7 @@ static void test_cache_erase_parallel(size_t megabytes) {
                 set.contains(hashes[i], true);
             }
         });
+    }
 
     /** Wait for all threads to finish */
     for (std::thread &t : threads) {
@@ -280,8 +365,8 @@ static void test_cache_erase_parallel(size_t megabytes) {
 
 BOOST_AUTO_TEST_CASE(cuckoocache_erase_parallel_ok) {
     size_t megabytes = 4;
-    test_cache_erase_parallel<
-        CuckooCache::cache<uint256, SignatureCacheHasher>>(megabytes);
+    test_cache_erase_parallel<CuckooCacheSet>(megabytes);
+    test_cache_erase_parallel<CuckooCacheMap>(megabytes);
 }
 
 template <typename Cache> static void test_cache_generations() {
@@ -316,10 +401,7 @@ template <typename Cache> static void test_cache_generations() {
             inserts.resize(n_insert);
             reads.reserve(n_insert / 2);
             for (uint32_t i = 0; i < n_insert; ++i) {
-                uint32_t *ptr = (uint32_t *)inserts[i].begin();
-                for (uint8_t j = 0; j < 8; ++j) {
-                    *(ptr++) = InsecureRand32();
-                }
+                inserts[i] = InsecureRand256();
             }
             for (uint32_t i = 0; i < n_insert / 4; ++i) {
                 reads.push_back(inserts[i]);
@@ -355,7 +437,9 @@ template <typename Cache> static void test_cache_generations() {
     // step, each of the last WINDOW_SIZE block_activities checks the cache for
     // POP_AMOUNT of the hashes that they inserted, and marks these erased.
     for (uint32_t i = 0; i < total; ++i) {
-        if (last_few.size() == WINDOW_SIZE) last_few.pop_front();
+        if (last_few.size() == WINDOW_SIZE) {
+            last_few.pop_front();
+        }
         last_few.emplace_back(BLOCK_SIZE, set);
         uint32_t count = 0;
         for (auto &act : last_few) {
@@ -379,8 +463,63 @@ template <typename Cache> static void test_cache_generations() {
     BOOST_CHECK(double(out_of_tight_tolerance) / double(total) <
                 max_rate_less_than_tight_hit_rate);
 }
+
 BOOST_AUTO_TEST_CASE(cuckoocache_generations) {
-    test_cache_generations<CuckooCache::cache<uint256, SignatureCacheHasher>>();
+    test_cache_generations<CuckooCacheSet>();
+    test_cache_generations<CuckooCacheMap>();
+}
+
+BOOST_AUTO_TEST_CASE(cuckoocache_map_element) {
+    // Check the hash is parsed properly.
+    uint256 hash = uint256S(
+        "baadf00dcafebeef00000000bada550ff1ce00000000000000000000deadc0de");
+    uint256 key = uint256S(
+        "baadf00dcafebeef00000000bada550ff1ce00000000000000000000abadba5e");
+    const TestMapElement e(hash);
+
+    BOOST_CHECK_EQUAL(e.getValue(), 0xdeadc0de);
+    BOOST_CHECK(e.getKey() == TestMapElement(key).getKey());
+}
+
+BOOST_AUTO_TEST_CASE(cuckoocache_map) {
+    SeedInsecureRand(true);
+
+    // 4k cache.
+    CuckooCacheMap cm{};
+    cm.setup_bytes(4 * 1024);
+
+    for (int x = 0; x < 100000; ++x) {
+        const TestMapElement e1(InsecureRand256());
+        const TestMapElement e2(e1.getKey(), e1.getValue() ^ 0xbabe);
+
+        BOOST_CHECK(e1.getKey() == e2.getKey());
+        BOOST_CHECK(e1.getValue() != e2.getValue());
+
+        // Insert a KV pair in the map and checks that it is effectively
+        // inserted.
+        BOOST_CHECK(!cm.contains(e1.getKey(), false));
+        cm.insert(e1);
+        BOOST_CHECK(cm.contains(e1.getKey(), false));
+
+        // Check that we recover the proper value from the map.
+        TestMapElement e(e1.getKey(), 0);
+        BOOST_CHECK(cm.get(e, false));
+        BOOST_CHECK(e.getKey() == e1.getKey());
+        BOOST_CHECK(e.getValue() == e1.getValue());
+
+        // Insert without replace will not change the value.
+        e = e2;
+        cm.insert(e2);
+        BOOST_CHECK(cm.get(e, false));
+        BOOST_CHECK(e.getKey() == e1.getKey());
+        BOOST_CHECK(e.getValue() == e1.getValue());
+
+        // Insert and replace.
+        cm.insert(e2, true);
+        BOOST_CHECK(cm.get(e, false));
+        BOOST_CHECK(e.getKey() == e2.getKey());
+        BOOST_CHECK(e.getValue() == e2.getValue());
+    }
 }
 
 BOOST_AUTO_TEST_SUITE_END();

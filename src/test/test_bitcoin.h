@@ -5,13 +5,14 @@
 #ifndef BITCOIN_TEST_TEST_BITCOIN_H
 #define BITCOIN_TEST_TEST_BITCOIN_H
 
+#include <amount.h>
 #include <chainparamsbase.h>
 #include <fs.h>
 #include <key.h>
+#include <primitives/transaction.h>
 #include <pubkey.h>
 #include <random.h>
 #include <scheduler.h>
-#include <txmempool.h>
 
 /**
  * Version of Boost::test prior to 1.64 have issues when dealing with nullptr_t.
@@ -30,6 +31,11 @@
  * per-thread instance could be used in the multi-threaded test.
  */
 extern FastRandomContext g_insecure_rand_ctx;
+
+/**
+ * Flag to make GetRand in random.h return the same number
+ */
+extern bool g_mock_deterministic_tests;
 
 static inline void SeedInsecureRand(bool deterministic = false) {
     g_insecure_rand_ctx = FastRandomContext(deterministic);
@@ -110,26 +116,20 @@ struct TestChain100Setup : public TestingSetup {
 };
 
 class CTxMemPoolEntry;
-class CTxMemPool;
 
 struct TestMemPoolEntryHelper {
     // Default values
     Amount nFee;
     int64_t nTime;
-    double dPriority;
     unsigned int nHeight;
     bool spendsCoinbase;
-    unsigned int sigOpCost;
-    LockPoints lp;
+    unsigned int nSigOpCount;
 
     TestMemPoolEntryHelper()
-        : nFee(), nTime(0), dPriority(0.0), nHeight(1), spendsCoinbase(false),
-          sigOpCost(4) {}
+        : nFee(), nTime(0), nHeight(1), spendsCoinbase(false), nSigOpCount(1) {}
 
-    CTxMemPoolEntry FromTx(const CMutableTransaction &tx,
-                           CTxMemPool *pool = nullptr);
-    CTxMemPoolEntry FromTx(const CTransactionRef &tx,
-                           CTxMemPool *pool = nullptr);
+    CTxMemPoolEntry FromTx(const CMutableTransaction &tx);
+    CTxMemPoolEntry FromTx(const CTransactionRef &tx);
 
     // Change the default value
     TestMemPoolEntryHelper &Fee(Amount _fee) {
@@ -140,10 +140,6 @@ struct TestMemPoolEntryHelper {
         nTime = _time;
         return *this;
     }
-    TestMemPoolEntryHelper &Priority(double _priority) {
-        dPriority = _priority;
-        return *this;
-    }
     TestMemPoolEntryHelper &Height(unsigned int _height) {
         nHeight = _height;
         return *this;
@@ -152,14 +148,19 @@ struct TestMemPoolEntryHelper {
         spendsCoinbase = _flag;
         return *this;
     }
-    TestMemPoolEntryHelper &SigOpsCost(unsigned int _sigopsCost) {
-        sigOpCost = _sigopsCost;
+    TestMemPoolEntryHelper &SigOpCount(unsigned int _nSigOpCount) {
+        nSigOpCount = _nSigOpCount;
         return *this;
     }
 };
 
-// define an implicit conversion here so that uint256 may be used directly in
-// BOOST_CHECK_*
+enum class ScriptError;
+
+// define implicit conversions here so that these types may be used in
+// BOOST_*_EQUAL
 std::ostream &operator<<(std::ostream &os, const uint256 &num);
+std::ostream &operator<<(std::ostream &os, const ScriptError &err);
+
+CBlock getBlock13b8a();
 
 #endif // BITCOIN_TEST_TEST_BITCOIN_H

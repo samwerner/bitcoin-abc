@@ -15,6 +15,7 @@
 
 #include <boost/test/unit_test.hpp>
 
+#include <memory>
 #include <random>
 
 BOOST_FIXTURE_TEST_SUITE(coinselector_tests, WalletTestingSetup)
@@ -71,8 +72,8 @@ static void add_coin(CWallet &wallet, const Amount nValue, int nAge = 6 * 24,
         // fake out IsFromMe()
         tx.vin.resize(1);
     }
-    std::unique_ptr<CWalletTx> wtx(
-        new CWalletTx(&wallet, MakeTransactionRef(std::move(tx))));
+    auto wtx =
+        std::make_unique<CWalletTx>(&wallet, MakeTransactionRef(std::move(tx)));
     if (fIsFromMe) {
         wtx->fDebitCached = true;
         wtx->nDebitCached = SATOSHI;
@@ -147,7 +148,6 @@ BOOST_AUTO_TEST_CASE(bnb_search_test) {
     /////////////////////////
     // Known Outcome tests //
     /////////////////////////
-    BOOST_TEST_MESSAGE("Testing known outcomes");
 
     // Empty utxo pool
     BOOST_CHECK(!SelectCoinsBnB(GroupCoins(utxo_pool), 1 * CENT, CENT / 2,
@@ -165,6 +165,7 @@ BOOST_AUTO_TEST_CASE(bnb_search_test) {
     BOOST_CHECK(SelectCoinsBnB(GroupCoins(utxo_pool), 1 * CENT, CENT / 2,
                                selection, value_ret, not_input_fees));
     BOOST_CHECK(equal_sets(selection, actual_selection));
+    BOOST_CHECK_EQUAL(value_ret, 1 * CENT);
     actual_selection.clear();
     selection.clear();
 
@@ -173,6 +174,7 @@ BOOST_AUTO_TEST_CASE(bnb_search_test) {
     BOOST_CHECK(SelectCoinsBnB(GroupCoins(utxo_pool), 2 * CENT, CENT / 2,
                                selection, value_ret, not_input_fees));
     BOOST_CHECK(equal_sets(selection, actual_selection));
+    BOOST_CHECK_EQUAL(value_ret, 2 * CENT);
     actual_selection.clear();
     selection.clear();
 
@@ -182,6 +184,7 @@ BOOST_AUTO_TEST_CASE(bnb_search_test) {
     BOOST_CHECK(SelectCoinsBnB(GroupCoins(utxo_pool), 5 * CENT, CENT / 2,
                                selection, value_ret, not_input_fees));
     BOOST_CHECK(equal_sets(selection, actual_selection));
+    BOOST_CHECK_EQUAL(value_ret, 5 * CENT);
     actual_selection.clear();
     selection.clear();
 
@@ -200,6 +203,7 @@ BOOST_AUTO_TEST_CASE(bnb_search_test) {
     BOOST_CHECK(SelectCoinsBnB(GroupCoins(utxo_pool), 10 * CENT, CENT / 2,
                                selection, value_ret, not_input_fees));
     BOOST_CHECK(equal_sets(selection, actual_selection));
+    BOOST_CHECK_EQUAL(value_ret, 10 * CENT);
     actual_selection.clear();
     selection.clear();
 
@@ -210,6 +214,9 @@ BOOST_AUTO_TEST_CASE(bnb_search_test) {
     add_coin(2 * CENT, 2, actual_selection);
     BOOST_CHECK(SelectCoinsBnB(GroupCoins(utxo_pool), 10 * CENT, 5000 * SATOSHI,
                                selection, value_ret, not_input_fees));
+    BOOST_CHECK_EQUAL(value_ret, 10 * CENT);
+    // FIXME: this test is redundant with the above, because 1 Cent is selected,
+    // not "too small" BOOST_CHECK(equal_sets(selection, actual_selection));
 
     // Select 0.25 Cent, not possible
     BOOST_CHECK(!SelectCoinsBnB(GroupCoins(utxo_pool), CENT / 4, CENT / 2,
@@ -228,6 +235,7 @@ BOOST_AUTO_TEST_CASE(bnb_search_test) {
                                selection, value_ret, not_input_fees));
 
     // Test same value early bailout optimization
+    utxo_pool.clear();
     add_coin(7 * CENT, 7, actual_selection);
     add_coin(7 * CENT, 7, actual_selection);
     add_coin(7 * CENT, 7, actual_selection);
@@ -243,6 +251,8 @@ BOOST_AUTO_TEST_CASE(bnb_search_test) {
     }
     BOOST_CHECK(SelectCoinsBnB(GroupCoins(utxo_pool), 30 * CENT, 5000 * SATOSHI,
                                selection, value_ret, not_input_fees));
+    BOOST_CHECK_EQUAL(value_ret, 30 * CENT);
+    BOOST_CHECK(equal_sets(selection, actual_selection));
 
     ////////////////////
     // Behavior tests //
@@ -290,7 +300,9 @@ BOOST_AUTO_TEST_CASE(bnb_search_test) {
 }
 
 BOOST_AUTO_TEST_CASE(knapsack_solver_test) {
-    CWallet testWallet(Params(), "dummy", WalletDatabase::CreateDummy());
+    auto testChain = interfaces::MakeChain();
+    CWallet testWallet(Params(), *testChain, WalletLocation(),
+                       WalletDatabase::CreateDummy());
 
     CoinSet setCoinsRet, setCoinsRet2;
     Amount nValueRet;
@@ -587,18 +599,24 @@ BOOST_AUTO_TEST_CASE(knapsack_solver_test) {
             setCoinsRet, nValueRet, coin_selection_params, bnb_used));
         BOOST_CHECK_EQUAL(nValueRet, 101 * MIN_CHANGE);
         BOOST_CHECK_EQUAL(setCoinsRet.size(), 2U);
+    }
 
-        // test with many inputs
-        for (Amount amt = 1500 * SATOSHI; amt < COIN; amt = 10 * amt) {
-            empty_wallet();
-            // Create 676 inputs (=  (old MAX_STANDARD_TX_SIZE == 100000)  / 148
-            // bytes per input)
-            for (uint16_t j = 0; j < 676; j++) {
-                add_coin(testWallet, amt);
-            }
+    // test with many inputs
+    for (Amount amt = 1500 * SATOSHI; amt < COIN; amt = 10 * amt) {
+        empty_wallet();
+        // Create 676 inputs (=  (old MAX_STANDARD_TX_SIZE == 100000)  / 148
+        // bytes per input)
+        for (uint16_t j = 0; j < 676; j++) {
+            add_coin(testWallet, amt);
+        }
+
+        // We only create the wallet once to save time, but we still run the
+        // coin selection RUN_TESTS times.
+        for (int i = 0; i < RUN_TESTS; i++) {
             BOOST_CHECK(testWallet.SelectCoinsMinConf(
                 2000 * SATOSHI, filter_confirmed, GroupCoins(vCoins),
                 setCoinsRet, nValueRet, coin_selection_params, bnb_used));
+
             if (amt - 2000 * SATOSHI < MIN_CHANGE) {
                 // needs more than one input:
                 uint16_t returnSize = std::ceil(
@@ -612,14 +630,18 @@ BOOST_AUTO_TEST_CASE(knapsack_solver_test) {
                 BOOST_CHECK_EQUAL(setCoinsRet.size(), 1U);
             }
         }
+    }
 
-        // test randomness
-        {
-            empty_wallet();
-            for (int i2 = 0; i2 < 100; i2++) {
-                add_coin(testWallet, COIN);
-            }
+    // test randomness
+    {
+        empty_wallet();
+        for (int i2 = 0; i2 < 100; i2++) {
+            add_coin(testWallet, COIN);
+        }
 
+        // Again, we only create the wallet once to save time, but we still run
+        // the coin selection RUN_TESTS times.
+        for (int i = 0; i < RUN_TESTS; i++) {
             // picking 50 from 100 coins doesn't depend on the shuffle, but does
             // depend on randomness in the stochastic approximation code
             BOOST_CHECK(testWallet.SelectCoinsMinConf(
@@ -646,17 +668,19 @@ BOOST_AUTO_TEST_CASE(knapsack_solver_test) {
                 }
             }
             BOOST_CHECK_NE(fails, RANDOM_REPEATS);
+        }
 
-            // add 75 cents in small change.  not enough to make 90 cents, then
-            // try making 90 cents.  there are multiple competing "smallest
-            // bigger" coins, one of which should be picked at random
-            add_coin(testWallet, 5 * CENT);
-            add_coin(testWallet, 10 * CENT);
-            add_coin(testWallet, 15 * CENT);
-            add_coin(testWallet, 20 * CENT);
-            add_coin(testWallet, 25 * CENT);
+        // add 75 cents in small change.  not enough to make 90 cents, then
+        // try making 90 cents.  there are multiple competing "smallest
+        // bigger" coins, one of which should be picked at random
+        add_coin(testWallet, 5 * CENT);
+        add_coin(testWallet, 10 * CENT);
+        add_coin(testWallet, 15 * CENT);
+        add_coin(testWallet, 20 * CENT);
+        add_coin(testWallet, 25 * CENT);
 
-            fails = 0;
+        for (int i = 0; i < RUN_TESTS; i++) {
+            int fails = 0;
             for (int j = 0; j < RANDOM_REPEATS; j++) {
                 // selecting 1 from 100 identical coins depends on the shuffle;
                 // this test will fail 1% of the time run the test
@@ -674,6 +698,7 @@ BOOST_AUTO_TEST_CASE(knapsack_solver_test) {
             BOOST_CHECK_NE(fails, RANDOM_REPEATS);
         }
     }
+
     empty_wallet();
 }
 
@@ -704,7 +729,9 @@ BOOST_AUTO_TEST_CASE(ApproximateBestSubset) {
 // Tests that with the ideal conditions, the coin selector will always be able
 // to find a solution that can pay the target value
 BOOST_AUTO_TEST_CASE(SelectCoins_test) {
-    CWallet testWallet(Params(), "dummy", WalletDatabase::CreateDummy());
+    auto testChain = interfaces::MakeChain();
+    CWallet testWallet(Params(), *testChain, WalletLocation(),
+                       WalletDatabase::CreateDummy());
 
     // Random generator stuff
     std::default_random_engine generator;

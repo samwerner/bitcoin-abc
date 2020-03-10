@@ -1,4 +1,4 @@
-// Copyright (c) 2018 The Bitcoin developers
+// Copyright (c) 2018-2019 The Bitcoin developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -48,13 +48,26 @@ bool IsMagneticAnomalyEnabled(const Consensus::Params &params,
     return IsMagneticAnomalyEnabled(params, pindexPrev->nHeight);
 }
 
+static bool IsGravitonEnabled(const Consensus::Params &params,
+                              int32_t nHeight) {
+    return nHeight >= params.gravitonHeight;
+}
+
 bool IsGravitonEnabled(const Consensus::Params &params,
                        const CBlockIndex *pindexPrev) {
     if (pindexPrev == nullptr) {
         return false;
     }
 
+    return IsGravitonEnabled(params, pindexPrev->nHeight);
+}
+
+bool IsPhononEnabled(const Consensus::Params &params,
+                     const CBlockIndex *pindexPrev) {
+    if (pindexPrev == nullptr) {
+        return false;
+    }
+
     return pindexPrev->GetMedianTimePast() >=
-           gArgs.GetArg("-gravitonactivationtime",
-                        params.gravitonActivationTime);
+           gArgs.GetArg("-phononactivationtime", params.phononActivationTime);
 }

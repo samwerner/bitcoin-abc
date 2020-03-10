@@ -1,5 +1,5 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
-// Copyright (c) 2009-2016 The Bitcoin Core developers
+// Copyright (c) 2009-2018 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -15,8 +15,10 @@
 #include <httprpc.h>
 #include <httpserver.h>
 #include <init.h>
+#include <interfaces/chain.h>
 #include <noui.h>
 #include <rpc/server.h>
+#include <shutdown.h>
 #include <util/strencodings.h>
 #include <util/system.h>
 #include <walletinitinterface.h>
@@ -65,6 +67,9 @@ static bool AppInit(int argc, char *argv[]) {
     RPCServer rpcServer;
     HTTPRPCRequestProcessor httpRPCRequestProcessor(config, rpcServer);
 
+    InitInterfaces interfaces;
+    interfaces.chain = interfaces::MakeChain();
+
     bool fRet = false;
 
     //
@@ -73,11 +78,6 @@ static bool AppInit(int argc, char *argv[]) {
     // If Qt is used, parameters/bitcoin.conf are parsed in qt/bitcoin.cpp's
     // main()
     SetupServerArgs();
-#if HAVE_DECL_DAEMON
-    gArgs.AddArg("-daemon",
-                 _("Run in the background as a daemon and accept commands"),
-                 false, OptionsCategory::OPTIONS);
-#endif
     std::string error;
     if (!gArgs.ParseParameters(argc, argv, error)) {
         fprintf(stderr, "Error parsing command line arguments: %s\n",
@@ -201,7 +201,8 @@ static bool AppInit(int argc, char *argv[]) {
             // If locking the data directory failed, exit immediately
             return false;
         }
-        fRet = AppInitMain(config, rpcServer, httpRPCRequestProcessor);
+        fRet =
+            AppInitMain(config, rpcServer, httpRPCRequestProcessor, interfaces);
     } catch (const std::exception &e) {
         PrintExceptionContinue(&e, "AppInit()");
     } catch (...) {
@@ -213,7 +214,7 @@ static bool AppInit(int argc, char *argv[]) {
     } else {
         WaitForShutdown();
     }
-    Shutdown();
+    Shutdown(interfaces);
 
     return fRet;
 }

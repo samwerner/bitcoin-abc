@@ -29,27 +29,31 @@ struct TestSubscriber : public CValidationInterface {
     TestSubscriber(uint256 tip) : m_expected_tip(tip) {}
 
     void UpdatedBlockTip(const CBlockIndex *pindexNew,
-                         const CBlockIndex *pindexFork, bool fInitialDownload) {
+                         const CBlockIndex *pindexFork,
+                         bool fInitialDownload) override {
         BOOST_CHECK_EQUAL(m_expected_tip, pindexNew->GetBlockHash());
     }
 
-    void BlockConnected(const std::shared_ptr<const CBlock> &block,
-                        const CBlockIndex *pindex,
-                        const std::vector<CTransactionRef> &txnConflicted) {
+    void
+    BlockConnected(const std::shared_ptr<const CBlock> &block,
+                   const CBlockIndex *pindex,
+                   const std::vector<CTransactionRef> &txnConflicted) override {
         BOOST_CHECK_EQUAL(m_expected_tip, block->hashPrevBlock);
         BOOST_CHECK_EQUAL(m_expected_tip, pindex->pprev->GetBlockHash());
 
         m_expected_tip = block->GetHash();
     }
 
-    void BlockDisconnected(const std::shared_ptr<const CBlock> &block) {
+    void
+    BlockDisconnected(const std::shared_ptr<const CBlock> &block) override {
         BOOST_CHECK_EQUAL(m_expected_tip, block->GetHash());
 
         m_expected_tip = block->hashPrevBlock;
     }
 };
 
-std::shared_ptr<CBlock> Block(const Config &config, const uint256 &prev_hash) {
+std::shared_ptr<CBlock> Block(const Config &config,
+                              const BlockHash &prev_hash) {
     static int i = 0;
     static uint64_t time = config.GetChainParams().GenesisBlock().nTime;
 
@@ -81,14 +85,14 @@ std::shared_ptr<CBlock> FinalizeBlock(const Consensus::Params &params,
 
 // construct a valid block
 const std::shared_ptr<const CBlock> GoodBlock(const Config &config,
-                                              const uint256 &prev_hash) {
+                                              const BlockHash &prev_hash) {
     return FinalizeBlock(config.GetChainParams().GetConsensus(),
                          Block(config, prev_hash));
 }
 
 // construct an invalid block (but with a valid header)
 const std::shared_ptr<const CBlock> BadBlock(const Config &config,
-                                             const uint256 &prev_hash) {
+                                             const BlockHash &prev_hash) {
     auto pblock = Block(config, prev_hash);
 
     CMutableTransaction coinbase_spend;
@@ -103,7 +107,7 @@ const std::shared_ptr<const CBlock> BadBlock(const Config &config,
     return ret;
 }
 
-void BuildChain(const Config &config, const uint256 &root, int height,
+void BuildChain(const Config &config, const BlockHash &root, int height,
                 const unsigned int invalid_rate, const unsigned int branch_rate,
                 const unsigned int max_size,
                 std::vector<std::shared_ptr<const CBlock>> &blocks) {
@@ -161,7 +165,7 @@ BOOST_AUTO_TEST_CASE(processnewblock_signals_ordering) {
     const CBlockIndex *initial_tip = nullptr;
     {
         LOCK(cs_main);
-        initial_tip = chainActive.Tip();
+        initial_tip = ::ChainActive().Tip();
     }
     TestSubscriber sub(initial_tip->GetBlockHash());
     RegisterValidationInterface(&sub);
@@ -201,7 +205,8 @@ BOOST_AUTO_TEST_CASE(processnewblock_signals_ordering) {
 
     UnregisterValidationInterface(&sub);
 
-    BOOST_CHECK_EQUAL(sub.m_expected_tip, chainActive.Tip()->GetBlockHash());
+    BOOST_CHECK_EQUAL(sub.m_expected_tip,
+                      ::ChainActive().Tip()->GetBlockHash());
 }
 
 BOOST_AUTO_TEST_SUITE_END()

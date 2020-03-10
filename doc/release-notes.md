@@ -1,18 +1,12 @@
-Bitcoin ABC version 0.20.5 is now available from:
+Bitcoin ABC version 0.21.2 is now available from:
 
-  <https://download.bitcoinabc.org/0.20.5/>
+  <https://download.bitcoinabc.org/0.21.2/>
 
 This release includes the following features and fixes:
- - It is now possible to unload wallets dynamically at runtime. This feature is
-   currently only available through the RPC interface.
+Account API removed
+------------------
+ - The 'account' API was deprecated in v0.20.6 and has been fully removed in v0.21
+ - The 'label' API was introduced in v0.20.6 as a replacement for accounts.
 
-GUI changes
------------
- - Wallets loaded dynamically through the RPC interface may now be displayed in
-   the bitcoin-qt GUI.
- - The default wallet will now be labeled `[default wallet]` in the bitcoin-qt
-   GUI if no name is provided by the `-wallet` option on start up.
- - Wallets dynamically unloaded will now be reflected in the gui.
- - Block storage can be limited under Preferences, in the Main tab. Undoing
-   this setting requires downloading the full blockchain again. This mode is
-   incompatible with -txindex and -rescan.
+ - See the release notes from v0.20.6 for a full description of the changes from the
+'account' API to the 'label' API.

@@ -10,6 +10,7 @@
 
 #include <QEvent>
 #include <QHeaderView>
+#include <QItemDelegate>
 #include <QLabel>
 #include <QMessageBox>
 #include <QObject>
@@ -63,6 +64,8 @@ bool parseBitcoinURI(const QString &scheme, const QUrl &uri,
 bool parseBitcoinURI(const QString &scheme, QString uri,
                      SendCoinsRecipient *out);
 QString formatBitcoinURI(const SendCoinsRecipient &info);
+QString formatBitcoinURI(const CChainParams &params,
+                         const SendCoinsRecipient &info);
 
 // Returns true if given address+amount meets "dust" definition
 bool isDust(interfaces::Node &node, const QString &address, const Amount amount,
@@ -139,6 +142,9 @@ Qt::ConnectionType blockingGUIThreadConnection();
 
 // Determine whether a widget is hidden behind other windows
 bool isObscured(QWidget *w);
+
+// Activate, show and raise the widget
+void bringToFront(QWidget *w);
 
 // Open debug.log
 void openDebugLogfile();
@@ -260,6 +266,27 @@ protected:
 
 typedef ClickableProgressBar ProgressBar;
 
+class ItemDelegate : public QItemDelegate {
+    Q_OBJECT
+public:
+    ItemDelegate(QObject *parent) : QItemDelegate(parent) {}
+
+Q_SIGNALS:
+    void keyEscapePressed();
+
+private:
+    bool eventFilter(QObject *object, QEvent *event);
+};
+
+/**
+ * Returns the distance in pixels appropriate for drawing a subsequent character
+ * after text.
+ *
+ * In Qt 5.12 and before the QFontMetrics::width() is used and it is deprecated
+ * since Qt 13.0. In Qt 5.11 the QFontMetrics::horizontalAdvance() was
+ * introduced.
+ */
+int TextWidth(const QFontMetrics &fm, const QString &text);
 } // namespace GUIUtil
 
 #endif // BITCOIN_QT_GUIUTIL_H

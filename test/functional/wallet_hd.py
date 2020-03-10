@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright (c) 2016 The Bitcoin Core developers
+# Copyright (c) 2016-2019 The Bitcoin Core developers
 # Distributed under the MIT software license, see the accompanying
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
 """Test Hierarchical Deterministic wallet function."""
@@ -21,6 +21,9 @@ class WalletHDTest(BitcoinTestFramework):
         self.num_nodes = 2
         self.extra_args = [[], ['-keypool=0']]
 
+    def skip_test_if_missing_module(self):
+        self.skip_if_no_wallet()
+
     def run_test(self):
         # Make sure can't switch off usehd after wallet creation
         self.stop_node(1)
@@ -30,7 +33,9 @@ class WalletHDTest(BitcoinTestFramework):
         connect_nodes_bi(self.nodes[0], self.nodes[1])
 
         # Make sure we use hd, keep masterkeyid
-        masterkeyid = self.nodes[1].getwalletinfo()['hdmasterkeyid']
+        masterkeyid = self.nodes[1].getwalletinfo()['hdseedid']
+        assert_equal(masterkeyid, self.nodes[1].getwalletinfo()[
+                     'hdmasterkeyid'])
         assert_equal(len(masterkeyid), 40)
 
         # create an internal key
@@ -46,7 +51,7 @@ class WalletHDTest(BitcoinTestFramework):
         # This should be enough to keep the master key and the non-HD key
         self.nodes[1].backupwallet(
             os.path.join(self.nodes[1].datadir, "hd.bak"))
-        #self.nodes[1].dumpwallet(os.path.join(self.nodes[1].datadir, "hd.dump"))
+        # self.nodes[1].dumpwallet(os.path.join(self.nodes[1].datadir, "hd.dump"))
 
         # Derive some HD addresses and remember the last
         # Also send funds to each add
@@ -57,6 +62,7 @@ class WalletHDTest(BitcoinTestFramework):
             hd_add = self.nodes[1].getnewaddress()
             hd_info = self.nodes[1].getaddressinfo(hd_add)
             assert_equal(hd_info["hdkeypath"], "m/0'/0'/" + str(i) + "'")
+            assert_equal(hd_info["hdseedid"], masterkeyid)
             assert_equal(hd_info["hdmasterkeyid"], masterkeyid)
             self.nodes[0].sendtoaddress(hd_add, 1)
             self.nodes[0].generate(1)
@@ -75,7 +81,8 @@ class WalletHDTest(BitcoinTestFramework):
         self.log.info("Restore backup ...")
         self.stop_node(1)
         # we need to delete the complete regtest directory
-        # otherwise node1 would auto-recover all funds in flag the keypool keys as used
+        # otherwise node1 would auto-recover all funds in flag the keypool keys
+        # as used
         shutil.rmtree(os.path.join(self.nodes[1].datadir, "regtest", "blocks"))
         shutil.rmtree(os.path.join(
             self.nodes[1].datadir, "regtest", "chainstate"))
@@ -89,6 +96,7 @@ class WalletHDTest(BitcoinTestFramework):
             hd_add_2 = self.nodes[1].getnewaddress()
             hd_info_2 = self.nodes[1].getaddressinfo(hd_add_2)
             assert_equal(hd_info_2["hdkeypath"], "m/0'/0'/" + str(i) + "'")
+            assert_equal(hd_info_2["hdseedid"], masterkeyid)
             assert_equal(hd_info_2["hdmasterkeyid"], masterkeyid)
         assert_equal(hd_add, hd_add_2)
         connect_nodes_bi(self.nodes[0], self.nodes[1])
@@ -125,7 +133,8 @@ class WalletHDTest(BitcoinTestFramework):
         assert_equal(out['stop_height'], self.nodes[1].getblockcount())
         assert_equal(self.nodes[1].getbalance(), NUM_HD_ADDS + 1)
 
-        # send a tx and make sure its using the internal chain for the changeoutput
+        # send a tx and make sure its using the internal chain for the
+        # changeoutput
         txid = self.nodes[1].sendtoaddress(self.nodes[0].getnewaddress(), 1)
         outs = self.nodes[1].decoderawtransaction(
             self.nodes[1].gettransaction(txid)['hex'])['vout']
@@ -138,9 +147,9 @@ class WalletHDTest(BitcoinTestFramework):
         assert_equal(keypath[0:7], "m/0'/1'")
 
         # Generate a new HD seed on node 1 and make sure it is set
-        orig_masterkeyid = self.nodes[1].getwalletinfo()['hdmasterkeyid']
+        orig_masterkeyid = self.nodes[1].getwalletinfo()['hdseedid']
         self.nodes[1].sethdseed()
-        new_masterkeyid = self.nodes[1].getwalletinfo()['hdmasterkeyid']
+        new_masterkeyid = self.nodes[1].getwalletinfo()['hdseedid']
         assert orig_masterkeyid != new_masterkeyid
         addr = self.nodes[1].getnewaddress()
         # Make sure the new address is the first from the keypool
@@ -152,11 +161,11 @@ class WalletHDTest(BitcoinTestFramework):
         new_seed = self.nodes[0].dumpprivkey(self.nodes[0].getnewaddress())
         orig_masterkeyid = new_masterkeyid
         self.nodes[1].sethdseed(False, new_seed)
-        new_masterkeyid = self.nodes[1].getwalletinfo()['hdmasterkeyid']
+        new_masterkeyid = self.nodes[1].getwalletinfo()['hdseedid']
         assert orig_masterkeyid != new_masterkeyid
         addr = self.nodes[1].getnewaddress()
         assert_equal(orig_masterkeyid, self.nodes[1].getaddressinfo(
-            addr)['hdmasterkeyid'])
+            addr)['hdseedid'])
         # Make sure the new address continues previous keypool
         assert_equal(self.nodes[1].getaddressinfo(
             addr)['hdkeypath'], 'm/0\'/0\'/1\'')
@@ -165,7 +174,7 @@ class WalletHDTest(BitcoinTestFramework):
         self.nodes[1].keypoolrefill(1)
         next_addr = self.nodes[1].getnewaddress()
         assert_equal(new_masterkeyid, self.nodes[1].getaddressinfo(
-            next_addr)['hdmasterkeyid'])
+            next_addr)['hdseedid'])
         # Make sure the new address is not from previous keypool
         assert_equal(self.nodes[1].getaddressinfo(
             next_addr)['hdkeypath'], 'm/0\'/0\'/0\'')

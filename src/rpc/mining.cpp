@@ -1,5 +1,5 @@
 // Copyright (c) 2010 Satoshi Nakamoto
-// Copyright (c) 2009-2016 The Bitcoin Core developers
+// Copyright (c) 2009-2018 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -12,7 +12,6 @@
 #include <consensus/params.h>
 #include <consensus/validation.h>
 #include <core_io.h>
-#include <init.h>
 #include <key_io.h>
 #include <miner.h>
 #include <net.h>
@@ -21,6 +20,8 @@
 #include <rpc/blockchain.h>
 #include <rpc/mining.h>
 #include <rpc/server.h>
+#include <rpc/util.h>
+#include <shutdown.h>
 #include <txmempool.h>
 #include <util/strencodings.h>
 #include <util/system.h>
@@ -39,10 +40,10 @@
  * nonnegative, compute the estimate at the time when a given block was found.
  */
 static UniValue GetNetworkHashPS(int lookup, int height) {
-    CBlockIndex *pb = chainActive.Tip();
+    CBlockIndex *pb = ::ChainActive().Tip();
 
-    if (height >= 0 && height < chainActive.Height()) {
-        pb = chainActive[height];
+    if (height >= 0 && height < ::ChainActive().Height()) {
+        pb = ::ChainActive()[height];
     }
 
     if (pb == nullptr || !pb->nHeight) {
@@ -122,7 +123,7 @@ UniValue generateBlocks(const Config &config,
     {
         // Don't keep cs_main locked.
         LOCK(cs_main);
-        nHeight = chainActive.Height();
+        nHeight = ::ChainActive().Height();
         nHeightEnd = nHeight + nGenerate;
     }
 
@@ -141,7 +142,7 @@ UniValue generateBlocks(const Config &config,
 
         {
             LOCK(cs_main);
-            IncrementExtraNonce(pblock, chainActive.Tip(),
+            IncrementExtraNonce(pblock, ::ChainActive().Tip(),
                                 config.GetMaxBlockSize(), nExtraNonce);
         }
 
@@ -250,13 +251,10 @@ static UniValue getmininginfo(const Config &config,
     LOCK(cs_main);
 
     UniValue obj(UniValue::VOBJ);
-    obj.pushKV("blocks", int(chainActive.Height()));
+    obj.pushKV("blocks", int(::ChainActive().Height()));
     obj.pushKV("currentblocksize", uint64_t(nLastBlockSize));
     obj.pushKV("currentblocktx", uint64_t(nLastBlockTx));
-    obj.pushKV("difficulty", double(GetDifficulty(chainActive.Tip())));
-    obj.pushKV("blockprioritypercentage",
-               uint8_t(gArgs.GetArg("-blockprioritypercentage",
-                                    DEFAULT_BLOCK_PRIORITY_PERCENTAGE)));
+    obj.pushKV("difficulty", double(GetDifficulty(::ChainActive().Tip())));
     obj.pushKV("networkhashps", getnetworkhashps(config, request));
     obj.pushKV("pooledtx", uint64_t(g_mempool.size()));
     obj.pushKV("chain", config.GetChainParams().NetworkIDString());
@@ -271,17 +269,15 @@ static UniValue prioritisetransaction(const Config &config,
                                       const JSONRPCRequest &request) {
     if (request.fHelp || request.params.size() != 3) {
         throw std::runtime_error(
-            "prioritisetransaction <txid> <priority delta> <fee delta>\n"
+            "prioritisetransaction \"txid\" dummy fee_delta\n"
             "Accepts the transaction into mined blocks at a higher (or lower) "
             "priority\n"
             "\nArguments:\n"
             "1. \"txid\"       (string, required) The transaction id.\n"
-            "2. priority_delta (numeric, required) The priority to add or "
-            "subtract.\n"
-            "                  The transaction selection algorithm considers "
-            "the tx as it would have a higher priority.\n"
-            "                  (priority of a transaction is calculated: "
-            "coinage * value_in_satoshis / txsize) \n"
+            "2. dummy          (numeric, optional) API-Compatibility for "
+            "previous API. Must be zero or null.\n"
+            "                  DEPRECATED. For forward compatibility use named "
+            "arguments and omit this parameter.\n"
             "3. fee_delta      (numeric, required) The fee value (in satoshis) "
             "to add (or subtract, if negative).\n"
             "                  The fee is not actually paid, only the "
@@ -297,11 +293,16 @@ static UniValue prioritisetransaction(const Config &config,
 
     LOCK(cs_main);
 
-    uint256 hash = ParseHashStr(request.params[0].get_str(), "txid");
+    TxId txid(ParseHashV(request.params[0], "txid"));
     Amount nAmount = request.params[2].get_int64() * SATOSHI;
 
-    g_mempool.PrioritiseTransaction(hash, request.params[1].get_real(),
-                                    nAmount);
+    if (!(request.params[1].isNull() || request.params[1].get_real() == 0)) {
+        throw JSONRPCError(RPC_INVALID_PARAMETER,
+                           "Priority is no longer supported, dummy argument to "
+                           "prioritisetransaction must be 0.");
+    }
+
+    g_mempool.PrioritiseTransaction(txid, nAmount);
     return true;
 }
 
@@ -333,7 +334,7 @@ static UniValue getblocktemplate(const Config &config,
                                  const JSONRPCRequest &request) {
     if (request.fHelp || request.params.size() > 1) {
         throw std::runtime_error(
-            "getblocktemplate ( TemplateRequest )\n"
+            "getblocktemplate ( \"template_request\" )\n"
             "\nIf the request parameters include a 'mode' key, that is used to "
             "explicitly select between the default 'template' request or a "
             "'proposal'.\n"
@@ -395,8 +396,8 @@ static UniValue getblocktemplate(const Config &config,
             "key is not present, fee is unknown and clients MUST NOT assume "
             "there isn't one\n"
             "         \"sigops\" : n,                (numeric) total SigOps "
-            "cost, as counted for purposes of block limits; if key is not "
-            "present, sigop cost is unknown and clients MUST NOT assume it is "
+            "count, as counted for purposes of block limits; if key is not "
+            "present, sigop count is unknown and clients MUST NOT assume it is "
             "zero\n"
             "         \"required\" : true|false      (boolean) if provided and "
             "true, this transaction must be in the final block\n"
@@ -473,7 +474,7 @@ static UniValue getblocktemplate(const Config &config,
                                    "Block decode failed");
             }
 
-            uint256 hash = block.GetHash();
+            const BlockHash hash = block.GetHash();
             const CBlockIndex *pindex = LookupBlockIndex(hash);
             if (pindex) {
                 if (pindex->IsValid(BlockValidity::SCRIPTS)) {
@@ -485,7 +486,7 @@ static UniValue getblocktemplate(const Config &config,
                 return "duplicate-inconclusive";
             }
 
-            CBlockIndex *const pindexPrev = chainActive.Tip();
+            CBlockIndex *const pindexPrev = ::ChainActive().Tip();
             // TestBlockValidity only supports blocks built on the current Tip
             if (block.hashPrevBlock != pindexPrev->GetBlockHash()) {
                 return "inconclusive-not-best-prevblk";
@@ -532,12 +533,12 @@ static UniValue getblocktemplate(const Config &config,
             // Format: <hashBestChain><nTransactionsUpdatedLast>
             std::string lpstr = lpval.get_str();
 
-            hashWatchedChain.SetHex(lpstr.substr(0, 64));
+            hashWatchedChain = ParseHashV(lpstr.substr(0, 64), "longpollid");
             nTransactionsUpdatedLastLP = atoi64(lpstr.substr(64));
         } else {
             // NOTE: Spec does not specify behaviour for non-string longpollid,
             // but this makes testing easier
-            hashWatchedChain = chainActive.Tip()->GetBlockHash();
+            hashWatchedChain = ::ChainActive().Tip()->GetBlockHash();
             nTransactionsUpdatedLastLP = nTransactionsUpdatedLast;
         }
 
@@ -573,7 +574,7 @@ static UniValue getblocktemplate(const Config &config,
     static CBlockIndex *pindexPrev;
     static int64_t nStart;
     static std::unique_ptr<CBlockTemplate> pblocktemplate;
-    if (pindexPrev != chainActive.Tip() ||
+    if (pindexPrev != ::ChainActive().Tip() ||
         (g_mempool.GetTransactionsUpdated() != nTransactionsUpdatedLast &&
          GetTime() - nStart > 5)) {
         // Clear pindexPrev so future calls make a new block, despite any
@@ -582,7 +583,7 @@ static UniValue getblocktemplate(const Config &config,
 
         // Store the pindexBest used before CreateNewBlock, to avoid races
         nTransactionsUpdatedLast = g_mempool.GetTransactionsUpdated();
-        CBlockIndex *pindexPrevNew = chainActive.Tip();
+        CBlockIndex *pindexPrevNew = ::ChainActive().Tip();
         nStart = GetTime();
 
         // Create new block
@@ -623,9 +624,10 @@ static UniValue getblocktemplate(const Config &config,
         entry.pushKV("data", EncodeHexTx(tx));
         entry.pushKV("txid", txId.GetHex());
         entry.pushKV("hash", tx.GetHash().GetHex());
-        entry.pushKV("fee", pblocktemplate->entries[index_in_template].txFee /
-                                SATOSHI);
-        int64_t nTxSigOps = pblocktemplate->entries[index_in_template].txSigOps;
+        entry.pushKV("fee",
+                     pblocktemplate->entries[index_in_template].fees / SATOSHI);
+        int64_t nTxSigOps =
+            pblocktemplate->entries[index_in_template].sigOpCount;
         entry.pushKV("sigops", nTxSigOps);
 
         transactions.push_back(entry);
@@ -652,7 +654,7 @@ static UniValue getblocktemplate(const Config &config,
     result.pushKV("coinbaseaux", aux);
     result.pushKV("coinbasevalue",
                   int64_t(pblock->vtx[0]->vout[0].nValue / SATOSHI));
-    result.pushKV("longpollid", chainActive.Tip()->GetBlockHash().GetHex() +
+    result.pushKV("longpollid", ::ChainActive().Tip()->GetBlockHash().GetHex() +
                                     i64tostr(nTransactionsUpdatedLast));
     result.pushKV("target", hashTarget.GetHex());
     result.pushKV("mintime", int64_t(pindexPrev->GetMedianTimePast()) + 1);
@@ -721,7 +723,7 @@ static UniValue submitblock(const Config &config,
                            "Block does not start with a coinbase");
     }
 
-    uint256 hash = block.GetHash();
+    const BlockHash hash = block.GetHash();
     {
         LOCK(cs_main);
         const CBlockIndex *pindex = LookupBlockIndex(hash);
@@ -741,7 +743,12 @@ static UniValue submitblock(const Config &config,
     bool accepted =
         ProcessNewBlock(config, blockptr, /* fForceProcessing */ true,
                         /* fNewBlock */ &new_block);
+    // We are only interested in BlockChecked which will have been dispatched
+    // in-thread, so no need to sync before unregistering.
     UnregisterValidationInterface(&sc);
+    // Sync to ensure that the catcher's slots aren't executing when it goes out
+    // of scope and is deleted.
+    SyncWithValidationInterfaceQueue();
     if (!new_block && accepted) {
         return "duplicate";
     }
@@ -818,7 +825,7 @@ static const ContextFreeRPCCommand commands[] = {
     //  ---------- ------------------------ ---------------------- ----------
     {"mining",     "getnetworkhashps",      getnetworkhashps,      {"nblocks", "height"}},
     {"mining",     "getmininginfo",         getmininginfo,         {}},
-    {"mining",     "prioritisetransaction", prioritisetransaction, {"txid", "priority_delta", "fee_delta"}},
+    {"mining",     "prioritisetransaction", prioritisetransaction, {"txid", "dummy", "fee_delta"}},
     {"mining",     "getblocktemplate",      getblocktemplate,      {"template_request"}},
     {"mining",     "submitblock",           submitblock,           {"hexdata", "dummy"}},
     {"mining",     "submitheader",          submitheader,          {"hexdata"}},
@@ -830,6 +837,7 @@ static const ContextFreeRPCCommand commands[] = {
 // clang-format on
 
 void RegisterMiningRPCCommands(CRPCTable &t) {
-    for (unsigned int vcidx = 0; vcidx < ARRAYLEN(commands); vcidx++)
+    for (unsigned int vcidx = 0; vcidx < ARRAYLEN(commands); vcidx++) {
         t.appendCommand(commands[vcidx].name, &commands[vcidx]);
+    }
 }

@@ -19,6 +19,7 @@ enum class ScriptError {
     STACK_SIZE,
     SIG_COUNT,
     PUBKEY_COUNT,
+    INPUT_SIGCHECKS,
 
     /* Operands checks */
     INVALID_OPERAND_SIZE,
@@ -60,7 +61,6 @@ enum class ScriptError {
     MINIMALDATA,
     SIG_PUSHONLY,
     SIG_HIGH_S,
-    SIG_NULLDUMMY,
     PUBKEYTYPE,
     CLEANSTACK,
     MINIMALIF,
@@ -73,12 +73,12 @@ enum class ScriptError {
     /* softfork safeness */
     DISCOURAGE_UPGRADABLE_NOPS,
 
-    /* misc */
-    NONCOMPRESSED_PUBKEY,
-
     /* anti replay */
     ILLEGAL_FORKID,
     MUST_USE_FORKID,
+
+    /* Auxiliary errors (unused by interpreter) */
+    SIGCHECKS_LIMIT_EXCEEDED,
 
     ERROR_COUNT,
 };

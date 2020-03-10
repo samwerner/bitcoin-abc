@@ -36,8 +36,8 @@ X509 *parse_b64der_cert(const char *cert_data) {
 static SendCoinsRecipient handleRequest(PaymentServer *server,
                                         std::vector<uint8_t> &data) {
     RecipientCatcher sigCatcher;
-    QObject::connect(server, SIGNAL(receivedPaymentRequest(SendCoinsRecipient)),
-                     &sigCatcher, SLOT(getRecipient(SendCoinsRecipient)));
+    QObject::connect(server, &PaymentServer::receivedPaymentRequest,
+                     &sigCatcher, &RecipientCatcher::getRecipient);
 
     // Write data to a temp file:
     QTemporaryFile f;
@@ -54,9 +54,8 @@ static SendCoinsRecipient handleRequest(PaymentServer *server,
     // will lead to a test failure anyway.
     QCoreApplication::sendEvent(&object, &event);
 
-    QObject::disconnect(server,
-                        SIGNAL(receivedPaymentRequest(SendCoinsRecipient)),
-                        &sigCatcher, SLOT(getRecipient(SendCoinsRecipient)));
+    QObject::disconnect(server, &PaymentServer::receivedPaymentRequest,
+                        &sigCatcher, &RecipientCatcher::getRecipient);
 
     // Return results from sigCatcher
     return sigCatcher.recipient;
@@ -188,12 +187,13 @@ void PaymentServerTests::paymentServerTests() {
     QCOMPARE(PaymentServer::verifyExpired(r.paymentRequest.getDetails()), true);
 
     // Test BIP70 DoS protection:
-    uint8_t randData[BIP70_MAX_PAYMENTREQUEST_SIZE + 1];
-    GetRandBytes(randData, sizeof(randData));
+    auto randdata =
+        FastRandomContext().randbytes(BIP70_MAX_PAYMENTREQUEST_SIZE + 1);
+
     // Write data to a temp file:
     QTemporaryFile tempFile;
     tempFile.open();
-    tempFile.write((const char *)randData, sizeof(randData));
+    tempFile.write((const char *)randdata.data(), randdata.size());
     tempFile.close();
     // compares 50001 <= BIP70_MAX_PAYMENTREQUEST_SIZE == false
     QCOMPARE(PaymentServer::verifySize(tempFile.size()), false);
@@ -208,8 +208,9 @@ void PaymentServerTests::paymentServerTests() {
     QList<std::pair<CScript, Amount>> sendingTos = r.paymentRequest.getPayTo();
     for (const std::pair<CScript, Amount> &sendingTo : sendingTos) {
         CTxDestination dest;
-        if (ExtractDestination(sendingTo.first, dest))
+        if (ExtractDestination(sendingTo.first, dest)) {
             QCOMPARE(PaymentServer::verifyAmount(sendingTo.second), false);
+        }
     }
 
     delete server;

@@ -9,6 +9,7 @@
 phutil_register_library_map(array(
   '__library_version__' => 2,
   'class' => array(
+    'ArcanistBitcoinABCConfiguration' => 'configuration/ArcanistBitcoinABCConfiguration.php',
     'AssertWithSideEffectsLinter' => 'linter/AssertWithSideEffectsLinter.php',
     'AutoPEP8FormatLinter' => 'linter/AutoPEP8Linter.php',
     'BashShebangLinter' => 'linter/BashShebangLinter.php',
@@ -18,6 +19,7 @@ phutil_register_library_map(array(
     'CheckRpcMappingsLinter' => 'linter/CheckRpcMappingsLinter.php',
     'ClangFormatLinter' => 'linter/ClangFormatLinter.php',
     'CppVoidParameterLinter' => 'linter/CppVoidParameterLinter.php',
+    'DoxygenLinter' => 'linter/DoxygenLinter.php',
     'ExtendedConfigurationDrivenLintEngine' => 'engine/ExtendedConfigurationDrivenLintEngine.php',
     'FileNameLinter' => 'linter/FileNameLinter.php',
     'FormatStringLinter' => 'linter/FormatStringLinter.php',
@@ -31,6 +33,7 @@ phutil_register_library_map(array(
     'PythonFormatLinter' => 'linter/PythonFormatLinter.php',
     'PythonOpenFileEncodingLinter' => 'linter/PythonOpenFileEncodingLinter.php',
     'PythonShebangLinter' => 'linter/PythonShebangLinter.php',
+    'Qt5Linter' => 'linter/Qt5Linter.php',
     'ShellCheckLinter' => 'linter/ShellCheckLinter.php',
     'ShellLocaleLinter' => 'linter/ShellLocaleLinter.php',
     'StdintLinter' => 'linter/StdintLinter.php',
@@ -38,6 +41,7 @@ phutil_register_library_map(array(
   ),
   'function' => array(),
   'xmap' => array(
+    'ArcanistBitcoinABCConfiguration' => 'ArcanistConfiguration',
     'AssertWithSideEffectsLinter' => 'ArcanistLinter',
     'AutoPEP8FormatLinter' => 'ArcanistExternalLinter',
     'BashShebangLinter' => 'ArcanistLinter',
@@ -47,6 +51,7 @@ phutil_register_library_map(array(
     'CheckRpcMappingsLinter' => 'GlobalExternalLinter',
     'ClangFormatLinter' => 'ArcanistExternalLinter',
     'CppVoidParameterLinter' => 'ArcanistLinter',
+    'DoxygenLinter' => 'ArcanistLinter',
     'ExtendedConfigurationDrivenLintEngine' => 'ArcanistLintEngine',
     'FileNameLinter' => 'ArcanistLinter',
     'FormatStringLinter' => 'ArcanistExternalLinter',
@@ -62,6 +67,7 @@ phutil_register_library_map(array(
     'PythonFormatLinter' => 'ArcanistExternalLinter',
     'PythonOpenFileEncodingLinter' => 'ArcanistLinter',
     'PythonShebangLinter' => 'ArcanistLinter',
+    'Qt5Linter' => 'ArcanistLinter',
     'ShellCheckLinter' => 'ArcanistExternalLinter',
     'ShellLocaleLinter' => 'ArcanistLinter',
     'StdintLinter' => 'ArcanistLinter',

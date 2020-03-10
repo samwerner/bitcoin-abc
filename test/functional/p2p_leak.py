@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright (c) 2017 The Bitcoin Core developers
+# Copyright (c) 2017-2019 The Bitcoin Core developers
 # Distributed under the MIT software license, see the accompanying
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
 """Test message sending before handshake completion.
@@ -90,7 +90,8 @@ class CLazyNode(P2PInterface):
 
 class CNodeNoVersionBan(CLazyNode):
     # send a bunch of veracks without sending a message. This should get us disconnected.
-    # NOTE: implementation-specific check here. Remove if bitcoind ban behavior changes
+    # NOTE: implementation-specific check here. Remove if bitcoind ban
+    # behavior changes
     def on_open(self):
         super().on_open()
         for i in range(banscore):
@@ -148,7 +149,8 @@ class P2PLeakTest(BitcoinTestFramework):
                    timeout=10, lock=mininode_lock)
 
         # Mine a block and make sure that it's not sent to the connected nodes
-        self.nodes[0].generate(1)
+        self.nodes[0].generatetoaddress(
+            1, self.nodes[0].get_deterministic_priv_key().address)
 
         # Give the node enough time to possibly leak out a message
         time.sleep(5)
@@ -162,9 +164,9 @@ class P2PLeakTest(BitcoinTestFramework):
         wait_until(lambda: len(self.nodes[0].getpeerinfo()) == 0)
 
         # Make sure no unexpected messages came in
-        assert(no_version_bannode.unexpected_msg == False)
-        assert(no_version_idlenode.unexpected_msg == False)
-        assert(no_verack_idlenode.unexpected_msg == False)
+        assert not no_version_bannode.unexpected_msg
+        assert not no_version_idlenode.unexpected_msg
+        assert not no_verack_idlenode.unexpected_msg
 
 
 if __name__ == '__main__':

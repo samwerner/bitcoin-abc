@@ -18,7 +18,7 @@ import time
 from test_framework.blocktools import (
     create_block,
     create_coinbase,
-    create_transaction,
+    create_tx_with_script,
     make_conform_to_ctor,
 )
 from test_framework.cdefs import ONE_MEGABYTE
@@ -91,14 +91,15 @@ class FullBlockTest(BitcoinTestFramework):
         self.tip = None
         self.blocks = {}
         self.excessive_block_size = 16 * ONE_MEGABYTE
-        self.extra_args = [['-norelaypriority',
-                            '-whitelist=127.0.0.1',
+        self.extra_args = [['-whitelist=127.0.0.1',
                             '-limitancestorcount=999999',
                             '-limitancestorsize=999999',
                             '-limitdescendantcount=999999',
                             '-limitdescendantsize=999999',
                             '-maxmempool=99999',
                             "-excessiveblocksize={}".format(self.excessive_block_size)]]
+        # UBSAN will cause this test to timeout without this.
+        self.rpc_timeout = 180
 
     def add_options(self, parser):
         super().add_options(parser)
@@ -111,11 +112,12 @@ class FullBlockTest(BitcoinTestFramework):
 
     # this is a little handier to use than the version in blocktools.py
     def create_tx(self, spend_tx, n, value, script=CScript([OP_TRUE])):
-        tx = create_transaction(spend_tx, n, b"", value, script)
+        tx = create_tx_with_script(spend_tx, n, b"", value, script)
         return tx
 
-    def next_block(self, number, spend=None, script=CScript([OP_TRUE]), block_size=0, extra_txns=0):
-        if self.tip == None:
+    def next_block(self, number, spend=None, script=CScript(
+            [OP_TRUE]), block_size=0, extra_txns=0):
+        if self.tip is None:
             base_block_hash = self.genesis_hash
             block_time = int(time.time()) + 1
         else:
@@ -125,7 +127,7 @@ class FullBlockTest(BitcoinTestFramework):
         height = self.block_heights[base_block_hash] + 1
         coinbase = create_coinbase(height)
         coinbase.rehash()
-        if spend == None:
+        if spend is None:
             # We need to have something to spend to fill the block.
             assert_equal(block_size, 0)
             block = create_block(base_block_hash, coinbase, block_time)
@@ -154,14 +156,16 @@ class FullBlockTest(BitcoinTestFramework):
             tx = get_base_transaction()
 
             # Make it the same format as transaction added for padding and save the size.
-            # It's missing the padding output, so we add a constant to account for it.
+            # It's missing the padding output, so we add a constant to account
+            # for it.
             tx.rehash()
 
             # If a specific script is required, add it.
-            if script != None:
+            if script is not None:
                 tx.vout.append(CTxOut(1, script))
 
-            # Put some random data into the first transaction of the chain to randomize ids.
+            # Put some random data into the first transaction of the chain to
+            # randomize ids.
             tx.vout.append(
                 CTxOut(0, CScript([random.randint(0, 256), OP_RETURN])))
 
@@ -277,7 +281,7 @@ class FullBlockTest(BitcoinTestFramework):
         # Check that compact block also work for big blocks
         # Wait for SENDCMPCT
         def received_sendcmpct():
-            return (test_p2p.last_sendcmpct != None)
+            return (test_p2p.last_sendcmpct is not None)
         wait_until(received_sendcmpct, timeout=30)
 
         sendcmpct = msg_sendcmpct()
@@ -287,7 +291,7 @@ class FullBlockTest(BitcoinTestFramework):
 
         # Exchange headers
         def received_getheaders():
-            return (test_p2p.last_getheaders != None)
+            return (test_p2p.last_getheaders is not None)
         wait_until(received_getheaders, timeout=30)
 
         # Return the favor
@@ -295,7 +299,7 @@ class FullBlockTest(BitcoinTestFramework):
 
         # Wait for the header list
         def received_headers():
-            return (test_p2p.last_headers != None)
+            return (test_p2p.last_headers is not None)
         wait_until(received_headers, timeout=30)
 
         # It's like we know about the same headers !
@@ -307,13 +311,13 @@ class FullBlockTest(BitcoinTestFramework):
 
         # Checks the node to forward it via compact block
         def received_block():
-            return (test_p2p.last_cmpctblock != None)
+            return (test_p2p.last_cmpctblock is not None)
         wait_until(received_block, timeout=30)
 
         # Was it our block ?
         cmpctblk_header = test_p2p.last_cmpctblock.header_and_shortids.header
         cmpctblk_header.calc_sha256()
-        assert(cmpctblk_header.sha256 == b1.sha256)
+        assert cmpctblk_header.sha256 == b1.sha256
 
         # Send a large block with numerous transactions.
         test_p2p.clear_block_data()
@@ -327,10 +331,12 @@ class FullBlockTest(BitcoinTestFramework):
         # Was it our block ?
         cmpctblk_header = test_p2p.last_cmpctblock.header_and_shortids.header
         cmpctblk_header.calc_sha256()
-        assert(cmpctblk_header.sha256 == b2.sha256)
+        assert cmpctblk_header.sha256 == b2.sha256
 
         # In order to avoid having to resend a ton of transactions, we invalidate
-        # b2, which will send all its transactions in the mempool.
+        # b2, which will send all its transactions in the mempool. Note that this
+        # assumes reorgs will insert low-fee transactions back into the
+        # mempool.
         node.invalidateblock(node.getbestblockhash())
 
         # Let's send a compact block and see if the node accepts it.
@@ -348,7 +354,7 @@ class FullBlockTest(BitcoinTestFramework):
         test_p2p.send_and_ping(msg_cmpctblock(comp_block.to_p2p()))
 
         # Check that compact block is received properly
-        assert(int(node.getbestblockhash(), 16) == b2.sha256)
+        assert int(node.getbestblockhash(), 16) == b2.sha256
 
 
 if __name__ == '__main__':

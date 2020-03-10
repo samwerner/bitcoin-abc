@@ -1,4 +1,4 @@
-// Copyright (c) 2018 The Bitcoin developers
+// Copyright (c) 2018-2020 The Bitcoin developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -12,19 +12,19 @@
 
 class CBlockFileInfo {
 public:
-    //!< number of blocks stored in file
+    //! number of blocks stored in file
     unsigned int nBlocks;
-    //!< number of used bytes of block file
+    //! number of used bytes of block file
     unsigned int nSize;
-    //!< number of used bytes in the undo file
+    //! number of used bytes in the undo file
     unsigned int nUndoSize;
-    //!< lowest height of block in file
+    //! lowest height of block in file
     unsigned int nHeightFirst;
-    //!< highest height of block in file
+    //! highest height of block in file
     unsigned int nHeightLast;
-    //!< earliest time of block in file
+    //! earliest time of block in file
     uint64_t nTimeFirst;
-    //!< latest time of block in file
+    //! latest time of block in file
     uint64_t nTimeLast;
 
     ADD_SERIALIZE_METHODS;
