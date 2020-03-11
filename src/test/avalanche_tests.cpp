@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Bitcoin developers
+// Copyright (c) 2010-2020 The Bitcoin developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -220,8 +220,12 @@ BOOST_AUTO_TEST_CASE(block_register) {
     std::vector<AvalancheBlockUpdate> updates;
 
     CBlock block = CreateAndProcessBlock({}, CScript());
-    const uint256 blockHash = block.GetHash();
-    const CBlockIndex *pindex = mapBlockIndex[blockHash];
+    const BlockHash blockHash = block.GetHash();
+    const CBlockIndex *pindex;
+    {
+        LOCK(cs_main);
+        pindex = LookupBlockIndex(blockHash);
+    }
 
     // Create nodes that supports avalanche.
     auto avanodes =
@@ -391,12 +395,17 @@ BOOST_AUTO_TEST_CASE(multi_block_register) {
 
     // Make sure the block has a hash.
     CBlock blockA = CreateAndProcessBlock({}, CScript());
-    const uint256 blockHashA = blockA.GetHash();
-    const CBlockIndex *pindexA = mapBlockIndex[blockHashA];
+    const BlockHash blockHashA = blockA.GetHash();
 
     CBlock blockB = CreateAndProcessBlock({}, CScript());
-    const uint256 blockHashB = blockB.GetHash();
-    const CBlockIndex *pindexB = mapBlockIndex[blockHashB];
+    const BlockHash blockHashB = blockB.GetHash();
+    const CBlockIndex *pindexA;
+    const CBlockIndex *pindexB;
+    {
+        LOCK(cs_main);
+        pindexA = LookupBlockIndex(blockHashA);
+        pindexB = LookupBlockIndex(blockHashB);
+    }
 
     // Querying for random block returns false.
     BOOST_CHECK(!p.isAccepted(pindexA));
@@ -497,8 +506,12 @@ BOOST_AUTO_TEST_CASE(poll_and_response) {
     std::vector<AvalancheBlockUpdate> updates;
 
     CBlock block = CreateAndProcessBlock({}, CScript());
-    const uint256 blockHash = block.GetHash();
-    const CBlockIndex *pindex = mapBlockIndex[blockHash];
+    const BlockHash blockHash = block.GetHash();
+    const CBlockIndex *pindex;
+    {
+        LOCK(cs_main);
+        pindex = LookupBlockIndex(blockHash);
+    }
 
     // There is no node to query.
     BOOST_CHECK_EQUAL(AvalancheTest::getSuitableNodeToQuery(p), NO_NODE);
@@ -594,8 +607,12 @@ BOOST_AUTO_TEST_CASE(poll_and_response) {
 
     // Out of order response are rejected.
     CBlock block2 = CreateAndProcessBlock({}, CScript());
-    const uint256 blockHash2 = block2.GetHash();
-    CBlockIndex *pindex2 = mapBlockIndex[blockHash2];
+    const BlockHash blockHash2 = block2.GetHash();
+    CBlockIndex *pindex2;
+    {
+        LOCK(cs_main);
+        pindex2 = LookupBlockIndex(blockHash2);
+    }
     BOOST_CHECK(p.addBlockToReconcile(pindex2));
 
     resp = {AvalancheTest::getRound(p),
@@ -644,8 +661,12 @@ BOOST_AUTO_TEST_CASE(poll_inflight_timeout) {
     std::vector<AvalancheBlockUpdate> updates;
 
     CBlock block = CreateAndProcessBlock({}, CScript());
-    const uint256 blockHash = block.GetHash();
-    const CBlockIndex *pindex = mapBlockIndex[blockHash];
+    const BlockHash blockHash = block.GetHash();
+    const CBlockIndex *pindex;
+    {
+        LOCK(cs_main);
+        pindex = LookupBlockIndex(blockHash);
+    }
 
     // Add the block
     BOOST_CHECK(p.addBlockToReconcile(pindex));
@@ -714,8 +735,12 @@ BOOST_AUTO_TEST_CASE(poll_inflight_count) {
 
     // Add a block to poll
     CBlock block = CreateAndProcessBlock({}, CScript());
-    const uint256 blockHash = block.GetHash();
-    const CBlockIndex *pindex = mapBlockIndex[blockHash];
+    const BlockHash blockHash = block.GetHash();
+    const CBlockIndex *pindex;
+    {
+        LOCK(cs_main);
+        pindex = LookupBlockIndex(blockHash);
+    }
     BOOST_CHECK(p.addBlockToReconcile(pindex));
 
     // Ensure there are enough requests in flight.
@@ -766,8 +791,12 @@ BOOST_AUTO_TEST_CASE(quorum_diversity) {
     std::vector<AvalancheBlockUpdate> updates;
 
     CBlock block = CreateAndProcessBlock({}, CScript());
-    const uint256 blockHash = block.GetHash();
-    const CBlockIndex *pindex = mapBlockIndex[blockHash];
+    const BlockHash blockHash = block.GetHash();
+    const CBlockIndex *pindex;
+    {
+        LOCK(cs_main);
+        pindex = LookupBlockIndex(blockHash);
+    }
 
     // Create nodes that supports avalanche.
     auto avanodes =
@@ -838,8 +867,12 @@ BOOST_AUTO_TEST_CASE(event_loop) {
     CScheduler s;
 
     CBlock block = CreateAndProcessBlock({}, CScript());
-    const uint256 blockHash = block.GetHash();
-    const CBlockIndex *pindex = mapBlockIndex[blockHash];
+    const BlockHash blockHash = block.GetHash();
+    const CBlockIndex *pindex;
+    {
+        LOCK(cs_main);
+        pindex = LookupBlockIndex(blockHash);
+    }
 
     // Starting the event loop.
     BOOST_CHECK(p.startEventLoop(s));
@@ -887,7 +920,7 @@ BOOST_AUTO_TEST_CASE(event_loop) {
     std::vector<AvalancheBlockUpdate> updates;
     p.registerVotes(nodeid, {queryRound, 100, {AvalancheVote(0, blockHash)}},
                     updates);
-    for (int i = 0; i < 1000; i++) {
+    for (int i = 0; i < 10000; i++) {
         // We make sure that we do not get a request before queryTime.
         boost::this_thread::sleep_for(boost::chrono::milliseconds(1));
         if (AvalancheTest::getRound(p) != responseRound) {

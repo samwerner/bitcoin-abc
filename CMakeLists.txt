@@ -1,8 +1,13 @@
 # Copyright (c) 2017 The Bitcoin developers
 
-cmake_minimum_required(VERSION 3.12)
+cmake_minimum_required(VERSION 3.13)
+
+set(CMAKE_USER_MAKE_RULES_OVERRIDE
+	"${CMAKE_SOURCE_DIR}/cmake/modules/OverrideInitFlags.cmake"
+)
+
 project(bitcoin-abc
-	VERSION 0.20.5
+	VERSION 0.21.2
 	DESCRIPTION "Bitcoin ABC is a full node implementation of the Bitcoin Cash protocol."
 	HOMEPAGE_URL "https://www.bitcoinabc.org"
 )
@@ -17,20 +22,10 @@ set(COPYRIGHT_HOLDERS_SUBSTITUTION Bitcoin)
 string(REPLACE "%s" ${COPYRIGHT_HOLDERS_SUBSTITUTION} COPYRIGHT_HOLDERS_FINAL ${COPYRIGHT_HOLDERS})
 
 # Add path for custom modules
-set(CMAKE_MODULE_PATH
-	${CMAKE_MODULE_PATH}
-	${CMAKE_CURRENT_SOURCE_DIR}/cmake/modules
-)
+list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake/modules)
 
 # Make contrib script accessible.
 set(CONTRIB_PATH ${CMAKE_CURRENT_SOURCE_DIR}/contrib)
-
-# If ccache is available, then use it.
-find_program(CCACHE ccache)
-if(CCACHE)
-	set_property(GLOBAL PROPERTY RULE_LAUNCH_COMPILE ${CCACHE})
-	set_property(GLOBAL PROPERTY RULE_LAUNCH_LINK ${CCACHE})
-endif(CCACHE)
 
 # Default to RelWithDebInfo configuration
 if(NOT CMAKE_BUILD_TYPE)
@@ -39,13 +34,14 @@ if(NOT CMAKE_BUILD_TYPE)
 endif()
 
 # Find the python interpreter. This is required for several targets.
-find_package(PythonInterp 3.4 REQUIRED)
+find_package(Python 3.5 COMPONENTS Interpreter REQUIRED)
 
 # Add the magic targets `check-*`
 add_custom_target(check-all)
 add_custom_target(check)
-add_custom_target(check-symbols)
-add_custom_target(check-security)
+add_custom_target(check-extended)
+add_custom_target(check-upgrade-activated)
+add_custom_target(check-upgrade-activated-extended)
 
 include(PackageHelper)
 exclude_git_ignored_files_from_source_package()
@@ -76,6 +72,4 @@ add_subdirectory(test)
 add_subdirectory(contrib)
 add_subdirectory(doc)
 
-include(PackageOptions)
-get_property(CPACK_SOURCE_IGNORE_FILES GLOBAL PROPERTY SOURCE_PACKAGE_IGNORE_FILES)
-include(CPack)
+include(PackageOptions.cmake)

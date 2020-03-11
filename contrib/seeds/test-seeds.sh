@@ -9,6 +9,7 @@ set -u
 
 TOPLEVEL=$(git rev-parse --show-toplevel)
 DEFAULT_BUILD_DIR="${TOPLEVEL}/build"
+DEFAULT_RPC_PORT=18832
 
 help_message() {
   echo "Test connecting to seed nodes. Outputs the seeds that were successfully connected to."
@@ -23,7 +24,7 @@ help_message() {
   echo ""
   echo "Environment Variables:"
   echo "BUILD_DIR             Default: ${DEFAULT_BUILD_DIR}"
-  exit 0
+  echo "RPC_PORT              Default: ${DEFAULT_RPC_PORT}"
 }
 
 : "${BUILD_DIR:=${DEFAULT_BUILD_DIR}}"
@@ -38,12 +39,12 @@ case $1 in
     ;;
   -h|--help)
     help_message
-    shift # shift past argument
+    exit 0
     ;;
   *)
     echo "Unknown argument: $1"
     help_message
-    shift # shift past argument
+    exit 1
     ;;
 esac
 done
@@ -59,16 +60,21 @@ if [ ! -x "${BITCOIN_CLI}" ]; then
   exit 11
 fi
 
-BITCOIND="${BITCOIND} -connect=0 ${OPTION_TESTNET}"
-BITCOIN_CLI="${BITCOIN_CLI} ${OPTION_TESTNET}"
+TEMP_DATADIR=$(mktemp -d)
+: "${RPC_PORT:=${DEFAULT_RPC_PORT}}"
+BITCOIND="${BITCOIND} -datadir=${TEMP_DATADIR} ${OPTION_TESTNET} -rpcport=${RPC_PORT} -connect=0 -daemon"
+BITCOIN_CLI="${BITCOIN_CLI} -datadir=${TEMP_DATADIR} ${OPTION_TESTNET} -rpcport=${RPC_PORT}"
 
 >&2 echo "Spinning up bitcoind..."
-${BITCOIND} &
-BITCOIND_PID=$!
+${BITCOIND} || {
+  echo "Error starting bitcoind. Stopping script."
+  exit 12
+}
 cleanup() {
   # Cleanup background processes spawned by this script.
-  >&2 echo "Cleaning up bitcoin daemon (PID: ${BITCOIND_PID})."
-  kill ${BITCOIND_PID}
+  >&2 echo "Cleaning up bitcoin daemon..."
+  ${BITCOIN_CLI} stop
+  rm -rf "${TEMP_DATADIR}"
 }
 trap "cleanup" EXIT
 

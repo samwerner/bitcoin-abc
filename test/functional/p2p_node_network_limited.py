@@ -83,7 +83,8 @@ class NodeNetworkLimitedTest(BitcoinTestFramework):
         self.log.info(
             "Mine enough blocks to reach the NODE_NETWORK_LIMITED range.")
         connect_nodes_bi(self.nodes[0], self.nodes[1])
-        blocks = self.nodes[1].generate(292)
+        blocks = self.nodes[1].generatetoaddress(
+            292, self.nodes[1].get_deterministic_priv_key().address)
         sync_blocks([self.nodes[0], self.nodes[1]])
 
         self.log.info("Make sure we can max retrieve block at tip-288.")
@@ -110,11 +111,12 @@ class NodeNetworkLimitedTest(BitcoinTestFramework):
         node1.wait_for_disconnect()
 
         # connect unsynced node 2 with pruned NODE_NETWORK_LIMITED peer
-        # because node 2 is in IBD and node 0 is a NODE_NETWORK_LIMITED peer, sync must not be possible
+        # because node 2 is in IBD and node 0 is a NODE_NETWORK_LIMITED peer,
+        # sync must not be possible
         connect_nodes_bi(self.nodes[0], self.nodes[2])
         try:
             sync_blocks([self.nodes[0], self.nodes[2]], timeout=5)
-        except:
+        except Exception:
             pass
         # node2 must remain at heigh 0
         assert_equal(self.nodes[2].getblockheader(
@@ -130,12 +132,15 @@ class NodeNetworkLimitedTest(BitcoinTestFramework):
         self.disconnect_all()
 
         # mine 10 blocks on node 0 (pruned node)
-        self.nodes[0].generate(10)
+        self.nodes[0].generatetoaddress(
+            10, self.nodes[0].get_deterministic_priv_key().address)
 
-        # connect node1 (non pruned) with node0 (pruned) and check if the can sync
+        # connect node1 (non pruned) with node0 (pruned) and check if the can
+        # sync
         connect_nodes_bi(self.nodes[0], self.nodes[1])
 
-        # sync must be possible, node 1 is no longer in IBD and should therefore connect to node 0 (NODE_NETWORK_LIMITED)
+        # sync must be possible, node 1 is no longer in IBD and should
+        # therefore connect to node 0 (NODE_NETWORK_LIMITED)
         sync_blocks([self.nodes[0], self.nodes[1]])
 
 

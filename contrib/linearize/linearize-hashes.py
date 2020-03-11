@@ -146,14 +146,16 @@ if __name__ == '__main__':
     if 'datadir' in settings and not use_userpass:
         use_datadir = True
     if not use_userpass and not use_datadir:
-        print("Missing datadir or username and/or password in cfg file", file=sys.stderr)
+        print("Missing datadir or username and/or password in cfg file",
+              file=sys.stderr)
         sys.exit(1)
 
     settings['port'] = int(settings['port'])
     settings['min_height'] = int(settings['min_height'])
     settings['max_height'] = int(settings['max_height'])
 
-    # Force hash byte format setting to be lowercase to make comparisons easier.
+    # Force hash byte format setting to be lowercase to make comparisons
+    # easier.
     settings['rev_hash_bytes'] = settings['rev_hash_bytes'].lower()
 
     # Get the rpc user and pass from the cookie if the datadir is set

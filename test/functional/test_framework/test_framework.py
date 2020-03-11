@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright (c) 2014-2016 The Bitcoin Core developers
+# Copyright (c) 2014-2019 The Bitcoin Core developers
 # Distributed under the MIT software license, see the accompanying
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
 """Base class for RPC testing."""
@@ -46,8 +46,15 @@ TEST_EXIT_PASSED = 0
 TEST_EXIT_FAILED = 1
 TEST_EXIT_SKIPPED = 77
 
-# Timestamp is 01.01.2019
-TIMESTAMP_IN_THE_PAST = 1546300800
+# Timestamp is Dec. 1st, 2019 at 00:00:00
+TIMESTAMP_IN_THE_PAST = 1575158400
+
+
+class SkipTest(Exception):
+    """This exception is raised to skip a test"""
+
+    def __init__(self, message):
+        self.message = message
 
 
 class BitcoinTestFramework():
@@ -72,6 +79,8 @@ class BitcoinTestFramework():
         self.nodes = []
         self.network_thread = None
         self.mocktime = 0
+        # Wait for up to 60 seconds for the RPC server to respond
+        self.rpc_timeout = 60
         self.supports_cli = False
         self.bind_to_localhost_only = True
 
@@ -101,8 +110,8 @@ class BitcoinTestFramework():
                             help="Attach a python debugger if test fails")
         parser.add_argument("--usecli", dest="usecli", default=False, action="store_true",
                             help="use bitcoin-cli instead of RPC for all commands")
-        parser.add_argument("--with-gravitonactivation", dest="gravitonactivation", default=False, action="store_true",
-                            help="Activate graviton update on timestamp {}".format(TIMESTAMP_IN_THE_PAST))
+        parser.add_argument("--with-phononactivation", dest="phononactivation", default=False, action="store_true",
+                            help="Activate phonon update on timestamp {}".format(TIMESTAMP_IN_THE_PAST))
         self.add_options(parser)
         self.options = parser.parse_args()
 
@@ -145,8 +154,10 @@ class BitcoinTestFramework():
             if self.options.usecli and not self.supports_cli:
                 raise SkipTest(
                     "--usecli specified but test does not support using CLI")
+            self.skip_test_if_missing_module()
             self.setup_chain()
             self.setup_network()
+            self.import_deterministic_coinbase_privkeys()
             self.run_test()
             success = TestStatus.PASSED
         except JSONRPCException:
@@ -213,6 +224,10 @@ class BitcoinTestFramework():
         """Override this method to add command-line options to the test"""
         pass
 
+    def skip_test_if_missing_module(self):
+        """Override this method to skip a test if a module is not compiled"""
+        pass
+
     def setup_chain(self):
         """Override this method to customize blockchain setup"""
         self.log.info("Initializing test directory " + self.options.tmpdir)
@@ -240,14 +255,32 @@ class BitcoinTestFramework():
         self.add_nodes(self.num_nodes, extra_args)
         self.start_nodes()
 
+    def import_deterministic_coinbase_privkeys(self):
+        if self.setup_clean_chain:
+            return
+
+        for n in self.nodes:
+            try:
+                n.getwalletinfo()
+            except JSONRPCException as e:
+                assert str(e).startswith('Method not found')
+                continue
+
+            n.importprivkey(n.get_deterministic_priv_key().key)
+
     def run_test(self):
         """Tests must override this method to define test logic"""
         raise NotImplementedError
 
-    # Public helper methods. These can be accessed by the subclass test scripts.
+    # Public helper methods. These can be accessed by the subclass test
+    # scripts.
 
-    def add_nodes(self, num_nodes, extra_args=None, rpchost=None, timewait=None, binary=None):
-        """Instantiate TestNode objects"""
+    def add_nodes(self, num_nodes, extra_args=None,
+                  *, rpchost=None, binary=None):
+        """Instantiate TestNode objects.
+
+        Should only be called once after the nodes have been specified in
+        set_test_params()."""
         if self.bind_to_localhost_only:
             extra_confs = [["bind=127.0.0.1"]] * num_nodes
         else:
@@ -260,11 +293,24 @@ class BitcoinTestFramework():
         assert_equal(len(extra_args), num_nodes)
         assert_equal(len(binary), num_nodes)
         for i in range(num_nodes):
-            self.nodes.append(TestNode(i, get_datadir_path(self.options.tmpdir, i), host=rpchost, rpc_port=rpc_port(i), p2p_port=p2p_port(i), timewait=timewait,
-                                       bitcoind=binary[i], bitcoin_cli=self.options.bitcoincli, mocktime=self.mocktime, coverage_dir=self.options.coveragedir, extra_conf=extra_confs[i], extra_args=extra_args[i], use_cli=self.options.usecli))
-            if self.options.gravitonactivation:
+            self.nodes.append(TestNode(
+                i,
+                get_datadir_path(self.options.tmpdir, i),
+                host=rpchost,
+                rpc_port=rpc_port(i),
+                p2p_port=p2p_port(i),
+                timewait=self.rpc_timeout,
+                bitcoind=binary[i],
+                bitcoin_cli=self.options.bitcoincli,
+                mocktime=self.mocktime,
+                coverage_dir=self.options.coveragedir,
+                extra_conf=extra_confs[i],
+                extra_args=extra_args[i],
+                use_cli=self.options.usecli,
+            ))
+            if self.options.phononactivation:
                 self.nodes[i].extend_default_args(
-                    ["-gravitonactivationtime={}".format(TIMESTAMP_IN_THE_PAST)])
+                    ["-phononactivationtime={}".format(TIMESTAMP_IN_THE_PAST)])
 
     def start_node(self, i, *args, **kwargs):
         """Start a bitcoind"""
@@ -288,7 +334,7 @@ class BitcoinTestFramework():
                 node.start(extra_args[i], *args, **kwargs)
             for node in self.nodes:
                 node.wait_for_rpc_connection()
-        except:
+        except BaseException:
             # If one node failed to start, stop the others
             self.stop_nodes()
             raise
@@ -298,16 +344,16 @@ class BitcoinTestFramework():
                 coverage.write_all_rpc_commands(
                     self.options.coveragedir, node.rpc)
 
-    def stop_node(self, i, expected_stderr=''):
+    def stop_node(self, i, expected_stderr='', wait=0):
         """Stop a bitcoind test node"""
-        self.nodes[i].stop_node(expected_stderr)
+        self.nodes[i].stop_node(expected_stderr, wait=wait)
         self.nodes[i].wait_until_stopped()
 
-    def stop_nodes(self):
+    def stop_nodes(self, wait=0):
         """Stop multiple bitcoind test nodes"""
         for node in self.nodes:
             # Issue RPC to stop nodes
-            node.stop_node()
+            node.stop_node(wait=wait)
 
         for node in self.nodes:
             # Wait for nodes to stop
@@ -344,7 +390,8 @@ class BitcoinTestFramework():
             sync_blocks(group)
             sync_mempools(group)
 
-    # Private helper methods. These should not be accessed by the subclass test scripts.
+    # Private helper methods. These should not be accessed by the subclass
+    # test scripts.
 
     def _start_logging(self):
         # Add logger and logging handlers
@@ -362,7 +409,8 @@ class BitcoinTestFramework():
         ll = int(self.options.loglevel) if self.options.loglevel.isdigit(
         ) else self.options.loglevel.upper()
         ch.setLevel(ll)
-        # Format logs the same as bitcoind's debug.log with microprecision (so log files can be concatenated and sorted)
+        # Format logs the same as bitcoind's debug.log with microprecision (so
+        # log files can be concatenated and sorted)
         formatter = logging.Formatter(
             fmt='%(asctime)s.%(msecs)03d000Z %(name)s (%(levelname)s): %(message)s', datefmt='%Y-%m-%dT%H:%M:%S')
         formatter.converter = time.gmtime
@@ -403,16 +451,29 @@ class BitcoinTestFramework():
             # Create cache directories, run bitcoinds:
             for i in range(MAX_NODES):
                 datadir = initialize_datadir(self.options.cachedir, i)
-                self.nodes.append(TestNode(i, get_datadir_path(self.options.cachedir, i), extra_conf=["bind=127.0.0.1"], extra_args=[], host=None, rpc_port=rpc_port(
-                    i), p2p_port=p2p_port(i), timewait=None, bitcoind=self.options.bitcoind, bitcoin_cli=self.options.bitcoincli, mocktime=self.mocktime, coverage_dir=None))
+                self.nodes.append(TestNode(
+                    i,
+                    get_datadir_path(self.options.cachedir, i),
+                    extra_conf=["bind=127.0.0.1"],
+                    extra_args=[],
+                    host=None,
+                    rpc_port=rpc_port(i),
+                    p2p_port=p2p_port(i),
+                    timewait=self.rpc_timeout,
+                    bitcoind=self.options.bitcoind,
+                    bitcoin_cli=self.options.bitcoincli,
+                    mocktime=self.mocktime,
+                    coverage_dir=None
+                ))
                 self.nodes[i].clear_default_args()
                 self.nodes[i].extend_default_args(["-datadir=" + datadir])
+                self.nodes[i].extend_default_args(["-disablewallet"])
                 if i > 0:
                     self.nodes[i].extend_default_args(
                         ["-connect=127.0.0.1:" + str(p2p_port(0))])
-                if self.options.gravitonactivation:
+                if self.options.phononactivation:
                     self.nodes[i].extend_default_args(
-                        ["-gravitonactivationtime={}".format(TIMESTAMP_IN_THE_PAST)])
+                        ["-phononactivationtime={}".format(TIMESTAMP_IN_THE_PAST)])
                 self.start_node(i)
 
             # Wait for RPC connections to be ready
@@ -436,7 +497,8 @@ class BitcoinTestFramework():
                 for peer in range(4):
                     for j in range(25):
                         set_node_times(self.nodes, block_time)
-                        self.nodes[peer].generate(1)
+                        self.nodes[peer].generatetoaddress(
+                            1, self.nodes[peer].get_deterministic_priv_key().address)
                         block_time += 10 * 60
                     # Must sync before next peer starts generating blocks
                     sync_blocks(self.nodes)
@@ -447,11 +509,14 @@ class BitcoinTestFramework():
             self.mocktime = 0
 
             def cache_path(n, *paths):
-                return os.path.join(get_datadir_path(self.options.cachedir, n), "regtest", *paths)
+                return os.path.join(get_datadir_path(
+                    self.options.cachedir, n), "regtest", *paths)
 
             for i in range(MAX_NODES):
+                # Remove empty wallets dir
+                os.rmdir(cache_path(i, 'wallets'))
                 for entry in os.listdir(cache_path(i)):
-                    if entry not in ['wallets', 'chainstate', 'blocks']:
+                    if entry not in ['chainstate', 'blocks']:
                         os.remove(cache_path(i, entry))
 
         for i in range(self.num_nodes):
@@ -469,9 +534,45 @@ class BitcoinTestFramework():
         for i in range(self.num_nodes):
             initialize_datadir(self.options.tmpdir, i)
 
+    def skip_if_no_py3_zmq(self):
+        """Attempt to import the zmq package and skip the test if the import fails."""
+        try:
+            import zmq  # noqa
+        except ImportError:
+            raise SkipTest("python3-zmq module not available.")
 
-class SkipTest(Exception):
-    """This exception is raised to skip a test"""
+    def skip_if_no_bitcoind_zmq(self):
+        """Skip the running test if bitcoind has not been compiled with zmq support."""
+        if not self.is_zmq_compiled():
+            raise SkipTest("bitcoind has not been built with zmq enabled.")
 
-    def __init__(self, message):
-        self.message = message
+    def skip_if_no_wallet(self):
+        """Skip the running test if wallet has not been compiled."""
+        if not self.is_wallet_compiled():
+            raise SkipTest("wallet has not been compiled.")
+
+    def skip_if_no_cli(self):
+        """Skip the running test if bitcoin-cli has not been compiled."""
+        if not self.is_cli_compiled():
+            raise SkipTest("bitcoin-cli has not been compiled.")
+
+    def is_cli_compiled(self):
+        """Checks whether bitcoin-cli was compiled."""
+        config = configparser.ConfigParser()
+        config.read_file(open(self.options.configfile, encoding='utf-8'))
+
+        return config["components"].getboolean("ENABLE_UTILS")
+
+    def is_wallet_compiled(self):
+        """Checks whether the wallet module was compiled."""
+        config = configparser.ConfigParser()
+        config.read_file(open(self.options.configfile, encoding='utf-8'))
+
+        return config["components"].getboolean("ENABLE_WALLET")
+
+    def is_zmq_compiled(self):
+        """Checks whether the zmq module was compiled."""
+        config = configparser.ConfigParser()
+        config.read_file(open(self.options.configfile, encoding='utf-8'))
+
+        return config["components"].getboolean("ENABLE_ZMQ")

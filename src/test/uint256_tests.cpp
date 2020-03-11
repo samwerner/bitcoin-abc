@@ -197,8 +197,8 @@ BOOST_AUTO_TEST_CASE(methods) {
     BOOST_CHECK(OneL.begin() + 32 == OneL.end());
     BOOST_CHECK(MaxL.begin() + 32 == MaxL.end());
     BOOST_CHECK(TmpL.begin() + 32 == TmpL.end());
-    BOOST_CHECK(GetSerializeSize(R1L, 0, PROTOCOL_VERSION) == 32);
-    BOOST_CHECK(GetSerializeSize(ZeroL, 0, PROTOCOL_VERSION) == 32);
+    BOOST_CHECK(GetSerializeSize(R1L, PROTOCOL_VERSION) == 32);
+    BOOST_CHECK(GetSerializeSize(ZeroL, PROTOCOL_VERSION) == 32);
 
     CDataStream ss(0, PROTOCOL_VERSION);
     ss << R1L;
@@ -245,8 +245,8 @@ BOOST_AUTO_TEST_CASE(methods) {
     BOOST_CHECK(OneS.begin() + 20 == OneS.end());
     BOOST_CHECK(MaxS.begin() + 20 == MaxS.end());
     BOOST_CHECK(TmpS.begin() + 20 == TmpS.end());
-    BOOST_CHECK(GetSerializeSize(R1S, 0, PROTOCOL_VERSION) == 20);
-    BOOST_CHECK(GetSerializeSize(ZeroS, 0, PROTOCOL_VERSION) == 20);
+    BOOST_CHECK(GetSerializeSize(R1S, PROTOCOL_VERSION) == 20);
+    BOOST_CHECK(GetSerializeSize(ZeroS, PROTOCOL_VERSION) == 20);
 
     ss << R1S;
     BOOST_CHECK(ss.str() == std::string(R1Array, R1Array + 20));
@@ -280,15 +280,18 @@ BOOST_AUTO_TEST_CASE(conversion) {
     BOOST_CHECK(R2L.GetHex() == UintToArith256(R2L).GetHex());
 }
 
+// Use *& to remove self-assign warning.
+#define SELF(x) (*&(x))
+
 BOOST_AUTO_TEST_CASE(operator_with_self) {
     arith_uint256 v = UintToArith256(uint256S("02"));
-    v *= v;
+    v *= SELF(v);
     BOOST_CHECK(v == UintToArith256(uint256S("04")));
-    v /= v;
+    v /= SELF(v);
     BOOST_CHECK(v == UintToArith256(uint256S("01")));
-    v += v;
+    v += SELF(v);
     BOOST_CHECK(v == UintToArith256(uint256S("02")));
-    v -= v;
+    v -= SELF(v);
     BOOST_CHECK(v == UintToArith256(uint256S("0")));
 }
 

@@ -21,7 +21,7 @@ foreach(_raw_file ${BENCH_DATA_RAW_FILES})
 	add_custom_command(
 		OUTPUT "${_generated_header_output}"
 		COMMAND 
-			"${PYTHON_EXECUTABLE}"
+			"${Python_EXECUTABLE}"
 			"data/convert-raw-to-header.py"
 			"${_test_name}"
 			"${_raw_file}" > "${_generated_header_output}"
@@ -34,7 +34,6 @@ foreach(_raw_file ${BENCH_DATA_RAW_FILES})
 endforeach()
 
 add_executable(bitcoin-bench
-	EXCLUDE_FROM_ALL
 	base58.cpp
 	bench.cpp
 	bench_bitcoin.cpp
@@ -44,6 +43,7 @@ add_executable(bitcoin-bench
 	checkqueue.cpp
 	crypto_aes.cpp
 	crypto_hash.cpp
+	duplicate_inputs.cpp
 	examples.cpp
 	gcs_filter.cpp
 	lockedpool.cpp
@@ -52,6 +52,7 @@ add_executable(bitcoin-bench
 	prevector.cpp
 	rollingbloom.cpp
 	rpc_mempool.cpp
+	util_time.cpp
 
 	# Add the generated headers to trigger the conversion command
 	${BENCH_DATA_GENERATED_HEADERS}
@@ -61,11 +62,7 @@ target_link_libraries(bitcoin-bench common bitcoinconsensus server)
 
 if(BUILD_BITCOIN_WALLET)
 	target_sources(bitcoin-bench PRIVATE coin_selection.cpp)
+	target_link_libraries(bitcoin-bench wallet)
 endif()
 
-add_custom_target(bench-bitcoin
-	COMMAND
-		./bitcoin-bench
-	DEPENDS
-		bitcoin-bench
-)
+add_custom_target(bench-bitcoin COMMAND bitcoin-bench USES_TERMINAL)

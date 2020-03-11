@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright (c) 2014-2016 The Bitcoin Core developers
+# Copyright (c) 2014-2019 The Bitcoin Core developers
 # Distributed under the MIT software license, see the accompanying
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
 """Test the importmulti RPC."""
@@ -15,6 +15,9 @@ class ImportMultiTest (BitcoinTestFramework):
     def set_test_params(self):
         self.num_nodes = 2
         self.setup_clean_chain = True
+
+    def skip_test_if_missing_module(self):
+        self.skip_if_no_wallet()
 
     def setup_network(self, split=False):
         self.setup_nodes()
@@ -42,7 +45,7 @@ class ImportMultiTest (BitcoinTestFramework):
 
         # RPC importmulti -----------------------------------------------
 
-        # Bitcoin Address
+        # Bitcoin Address (implicit non-internal)
         self.log.info("Should import an address")
         address = self.nodes[0].getaddressinfo(self.nodes[0].getnewaddress())
         result = self.nodes[1].importmulti([{
@@ -56,6 +59,7 @@ class ImportMultiTest (BitcoinTestFramework):
         assert_equal(address_assert['iswatchonly'], True)
         assert_equal(address_assert['ismine'], False)
         assert_equal(address_assert['timestamp'], timestamp)
+        assert_equal(address_assert['ischange'], False)
         watchonly_address = address['address']
         watchonly_timestamp = timestamp
 
@@ -83,6 +87,7 @@ class ImportMultiTest (BitcoinTestFramework):
         assert_equal(address_assert['iswatchonly'], True)
         assert_equal(address_assert['ismine'], False)
         assert_equal(address_assert['timestamp'], timestamp)
+        assert_equal(address_assert['ischange'], True)
 
         # ScriptPubKey + !internal
         self.log.info("Should not import a scriptPubKey without internal flag")
@@ -100,7 +105,7 @@ class ImportMultiTest (BitcoinTestFramework):
         assert_equal(address_assert['ismine'], False)
         assert_equal('timestamp' in address_assert, False)
 
-        # Address + Public key + !Internal
+        # Address + Public key + !Internal(explicit)
         self.log.info("Should import an address with public key")
         address = self.nodes[0].getaddressinfo(self.nodes[0].getnewaddress())
         result = self.nodes[1].importmulti([{
@@ -108,7 +113,8 @@ class ImportMultiTest (BitcoinTestFramework):
                 "address": address['address']
             },
             "timestamp": "now",
-            "pubkeys": [address['pubkey']]
+            "pubkeys": [address['pubkey']],
+            "internal": False
         }])
         assert_equal(result[0]['success'], True)
         address_assert = self.nodes[1].getaddressinfo(address['address'])
@@ -126,7 +132,7 @@ class ImportMultiTest (BitcoinTestFramework):
             "pubkeys": [address['pubkey']],
             "internal": True
         }]
-        result = self.nodes[1].importmulti(request)
+        result = self.nodes[1].importmulti(requests=request)
         assert_equal(result[0]['success'], True)
         address_assert = self.nodes[1].getaddressinfo(address['address'])
         assert_equal(address_assert['iswatchonly'], True)
@@ -142,7 +148,7 @@ class ImportMultiTest (BitcoinTestFramework):
             "timestamp": "now",
             "pubkeys": [address['pubkey']]
         }]
-        result = self.nodes[1].importmulti(request)
+        result = self.nodes[1].importmulti(requests=request)
         assert_equal(result[0]['success'], False)
         assert_equal(result[0]['error']['code'], -8)
         assert_equal(result[0]['error']['message'],
@@ -446,7 +452,8 @@ class ImportMultiTest (BitcoinTestFramework):
         assert_equal(address_assert['ismine'], False)
         assert_equal('timestamp' in address_assert, False)
 
-        # Importing existing watch only address with new timestamp should replace saved timestamp.
+        # Importing existing watch only address with new timestamp should
+        # replace saved timestamp.
         assert_greater_than(timestamp, watchonly_timestamp)
         self.log.info("Should replace previously saved watch only timestamp.")
         result = self.nodes[1].importmulti([{
@@ -462,7 +469,8 @@ class ImportMultiTest (BitcoinTestFramework):
         assert_equal(address_assert['timestamp'], timestamp)
         watchonly_timestamp = timestamp
 
-        # restart nodes to check for proper serialization/deserialization of watch only address
+        # restart nodes to check for proper serialization/deserialization of
+        # watch only address
         self.stop_nodes()
         self.start_nodes()
         address_assert = self.nodes[1].getaddressinfo(watchonly_address)

@@ -34,13 +34,13 @@ static int64_t nLastBlockTipUpdateNotification = 0;
 ClientModel::ClientModel(interfaces::Node &node, OptionsModel *_optionsModel,
                          QObject *parent)
     : QObject(parent), m_node(node), optionsModel(_optionsModel),
-      peerTableModel(0), banTableModel(0), pollTimer(0) {
+      peerTableModel(nullptr), banTableModel(nullptr), pollTimer(nullptr) {
     cachedBestHeaderHeight = -1;
     cachedBestHeaderTime = -1;
     peerTableModel = new PeerTableModel(m_node, this);
     banTableModel = new BanTableModel(m_node, this);
     pollTimer = new QTimer(this);
-    connect(pollTimer, SIGNAL(timeout()), this, SLOT(updateTimer()));
+    connect(pollTimer, &QTimer::timeout, this, &ClientModel::updateTimer);
     pollTimer->start(MODEL_UPDATE_DELAY);
 
     subscribeToCoreSignals();
@@ -50,7 +50,7 @@ ClientModel::~ClientModel() {
     unsubscribeFromCoreSignals();
 }
 
-int ClientModel::getNumConnections(unsigned int flags) const {
+int ClientModel::getNumConnections(NumConnections flags) const {
     CConnman::NumConnections connections = CConnman::CONNECTIONS_NONE;
 
     if (flags == CONNECTIONS_IN) {

@@ -12,15 +12,12 @@
 static void AddTx(const CTransactionRef &tx, const Amount &nFee,
                   CTxMemPool &pool) EXCLUSIVE_LOCKS_REQUIRED(cs_main, pool.cs) {
     int64_t nTime = 0;
-    double dPriority = 10.0;
     unsigned int nHeight = 1;
     bool spendsCoinbase = false;
-    unsigned int sigOpCost = 4;
+    unsigned int nSigOpCount = 1;
     LockPoints lp;
-    pool.addUnchecked(tx->GetId(),
-                      CTxMemPoolEntry(tx, nFee, nTime, dPriority, nHeight,
-                                      tx->GetValueOut(), spendsCoinbase,
-                                      sigOpCost, lp));
+    pool.addUnchecked(CTxMemPoolEntry(tx, nFee, nTime, nHeight, spendsCoinbase,
+                                      nSigOpCount, lp));
 }
 
 // Right now this is only testing eviction performance in an extremely small
@@ -117,7 +114,7 @@ static void MempoolEviction(benchmark::State &state) {
         AddTx(tx6_r, 1100 * SATOSHI, pool);
         AddTx(tx7_r, 9000 * SATOSHI, pool);
         pool.TrimToSize(pool.DynamicMemoryUsage() * 3 / 4);
-        pool.TrimToSize(GetVirtualTransactionSize(*tx1_r));
+        pool.TrimToSize(GetSerializeSize(*tx1_r, PROTOCOL_VERSION));
     }
 }
 

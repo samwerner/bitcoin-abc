@@ -1,6 +1,6 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
 // Copyright (c) 2009-2016 The Bitcoin Core developers
-// Copyright (c) 2017 The Bitcoin developers
+// Copyright (c) 2017-2020 The Bitcoin developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -19,6 +19,7 @@
 #include <fs.h>
 #include <protocol.h> // For CMessageHeader::MessageMagic
 #include <script/script_error.h>
+#include <script/script_metrics.h>
 #include <sync.h>
 #include <versionbits.h>
 
@@ -27,6 +28,7 @@
 #include <cstdint>
 #include <exception>
 #include <map>
+#include <memory>
 #include <set>
 #include <string>
 #include <utility>
@@ -57,7 +59,7 @@ struct Params;
 }
 
 #define MIN_TRANSACTION_SIZE                                                   \
-    (::GetSerializeSize(CTransaction(), SER_NETWORK, PROTOCOL_VERSION))
+    (::GetSerializeSize(CTransaction(), PROTOCOL_VERSION))
 
 /** Default for -whitelistrelay. */
 static const bool DEFAULT_WHITELISTRELAY = true;
@@ -75,18 +77,10 @@ static const Amount HIGH_TX_FEE_PER_KB(COIN / 100);
  * -maxtxfee will warn if called with a higher fee than this amount (in satoshis
  */
 static const Amount HIGH_MAX_TX_FEE(100 * HIGH_TX_FEE_PER_KB);
-/** Default for -limitancestorcount, max number of in-mempool ancestors */
-static const unsigned int DEFAULT_ANCESTOR_LIMIT = 25;
-/** Default for -limitancestorsize, maximum kilobytes of tx + all in-mempool
- * ancestors */
-static const unsigned int DEFAULT_ANCESTOR_SIZE_LIMIT = 101;
-/** Default for -limitdescendantcount, max number of in-mempool descendants */
-static const unsigned int DEFAULT_DESCENDANT_LIMIT = 25;
-/** Default for -limitdescendantsize, maximum kilobytes of in-mempool
- * descendants */
-static const unsigned int DEFAULT_DESCENDANT_SIZE_LIMIT = 101;
-/** Default for -mempoolexpiry, expiration time for mempool transactions in
- * hours */
+/**
+ * Default for -mempoolexpiry, expiration time for mempool transactions in
+ * hours.
+ */
 static const unsigned int DEFAULT_MEMPOOL_EXPIRY = 336;
 /** The maximum size of a blk?????.dat file (since 0.8) */
 static const unsigned int MAX_BLOCKFILE_SIZE = 0x8000000; // 128 MiB
@@ -137,26 +131,6 @@ static const unsigned int DATABASE_WRITE_INTERVAL = 60 * 60;
 static const unsigned int DATABASE_FLUSH_INTERVAL = 24 * 60 * 60;
 /** Maximum length of reject messages. */
 static const unsigned int MAX_REJECT_MESSAGE_LENGTH = 111;
-/** Average delay between local address broadcasts in seconds. */
-static const unsigned int AVG_LOCAL_ADDRESS_BROADCAST_INTERVAL = 24 * 60 * 60;
-/** Average delay between peer address broadcasts in seconds. */
-static const unsigned int AVG_ADDRESS_BROADCAST_INTERVAL = 30;
-/**
- * Average delay between trickled inventory transmissions in seconds.
- * Blocks and whitelisted receivers bypass this, outbound peers get half this
- * delay.
- */
-static const unsigned int INVENTORY_BROADCAST_INTERVAL = 5;
-/**
- * Maximum number of inventory items to send per transmission.
- * Limits the impact of low-fee transaction floods.
- */
-static const unsigned int INVENTORY_BROADCAST_MAX_PER_MB =
-    7 * INVENTORY_BROADCAST_INTERVAL;
-/** Average delay between feefilter broadcasts in seconds. */
-static const unsigned int AVG_FEEFILTER_BROADCAST_INTERVAL = 10 * 60;
-/** Maximum feefilter broadcast delay after significant change. */
-static const unsigned int MAX_FEEFILTER_CHANGE_DELAY = 5 * 60;
 /** Block download timeout base, expressed in millionths of the block interval
  * (i.e. 10 min) */
 static const int64_t BLOCK_DOWNLOAD_TIMEOUT_BASE = 1000000;
@@ -165,8 +139,6 @@ static const int64_t BLOCK_DOWNLOAD_TIMEOUT_BASE = 1000000;
  */
 static const int64_t BLOCK_DOWNLOAD_TIMEOUT_PER_PEER = 500000;
 
-static const unsigned int DEFAULT_LIMITFREERELAY = 0;
-static const bool DEFAULT_RELAYPRIORITY = true;
 static const int64_t DEFAULT_MAX_TIP_AGE = 24 * 60 * 60;
 /**
  * Maximum age of our tip in seconds for us to be considered current for fee
@@ -211,7 +183,6 @@ static const int64_t DEFAULT_MIN_FINALIZATION_DELAY = 2 * 60 * 60;
 extern CScript COINBASE_FLAGS;
 extern CCriticalSection cs_main;
 extern CTxMemPool g_mempool;
-extern std::atomic_bool g_is_mempool_loaded;
 extern uint64_t nLastBlockTx;
 extern uint64_t nLastBlockSize;
 extern const std::string strMessageMagic;
@@ -247,7 +218,7 @@ extern int64_t nMaxTipAge;
  * Block hash whose ancestors we will assume to have valid scripts without
  * checking them.
  */
-extern uint256 hashAssumeValid;
+extern BlockHash hashAssumeValid;
 
 /**
  * Minimum work we will assume exists on some valid chain.
@@ -266,8 +237,10 @@ extern bool fHavePruned;
 extern bool fPruneMode;
 /** Number of MiB of block files that we're trying to stay below. */
 extern uint64_t nPruneTarget;
-/** Block files containing a block-height within MIN_BLOCKS_TO_KEEP of
- * chainActive.Tip() will not be pruned. */
+/**
+ * Block files containing a block-height within MIN_BLOCKS_TO_KEEP of
+ * ::ChainActive().Tip() will not be pruned.
+ */
 static const unsigned int MIN_BLOCKS_TO_KEEP = 288;
 /** Minimum blocks required to signal NODE_NETWORK_LIMITED */
 static const unsigned int NODE_NETWORK_LIMITED_MIN_BLOCKS = 288;
@@ -333,8 +306,7 @@ public:
  * Note that we guarantee that either the proof-of-work is valid on pblock, or
  * (and possibly also) BlockChecked will have been called.
  *
- * May not be called with cs_main held. May not be called in a
- * validationinterface callback.
+ * May not be called in a validationinterface callback.
  *
  * @param[in]   config  The global config.
  * @param[in]   pblock  The block we want to process.
@@ -346,13 +318,13 @@ public:
  */
 bool ProcessNewBlock(const Config &config,
                      const std::shared_ptr<const CBlock> pblock,
-                     bool fForceProcessing, bool *fNewBlock);
+                     bool fForceProcessing, bool *fNewBlock)
+    LOCKS_EXCLUDED(cs_main);
 
 /**
  * Process incoming block headers.
  *
- * May not be called with cs_main held. May not be called in a
- * validationinterface callback.
+ * May not be called in a validationinterface callback.
  *
  * @param[in]  config        The config.
  * @param[in]  block         The block headers themselves.
@@ -367,7 +339,8 @@ bool ProcessNewBlockHeaders(const Config &config,
                             const std::vector<CBlockHeader> &block,
                             CValidationState &state,
                             const CBlockIndex **ppindex = nullptr,
-                            CBlockHeader *first_invalid = nullptr);
+                            CBlockHeader *first_invalid = nullptr)
+    LOCKS_EXCLUDED(cs_main);
 
 /**
  * Open a block file (blk?????.dat).
@@ -395,7 +368,7 @@ bool LoadGenesisBlock(const CChainParams &chainparams);
  * Load the block tree and coins database from disk, initializing state if we're
  * running with -reindex.
  */
-bool LoadBlockIndex(const Config &config);
+bool LoadBlockIndex(const Config &config) EXCLUSIVE_LOCKS_REQUIRED(cs_main);
 
 /**
  * Update the chain tip based on database information.
@@ -421,9 +394,10 @@ bool IsInitialBlockDownload();
 /**
  * Retrieve a transaction (from memory pool, or from disk, if possible).
  */
-bool GetTransaction(const Consensus::Params &params, const TxId &txid,
-                    CTransactionRef &tx, uint256 &hashBlock,
-                    bool fAllowSlow = false, CBlockIndex *blockIndex = nullptr);
+bool GetTransaction(const TxId &txid, CTransactionRef &txOut,
+                    const Consensus::Params &params, BlockHash &hashBlock,
+                    bool fAllowSlow = false,
+                    const CBlockIndex *const blockIndex = nullptr);
 
 /**
  * Find the best known block, and make it the tip of the block chain
@@ -451,7 +425,7 @@ uint64_t CalculateCurrentUsage();
 /**
  * Mark one block file as pruned.
  */
-void PruneOneBlockFile(const int fileNumber);
+void PruneOneBlockFile(const int fileNumber) EXCLUSIVE_LOCKS_REQUIRED(cs_main);
 
 /**
  * Actually unlink the specified files
@@ -470,14 +444,45 @@ void PruneBlockFilesManual(int nManualPruneHeight);
  */
 bool AcceptToMemoryPool(const Config &config, CTxMemPool &pool,
                         CValidationState &state, const CTransactionRef &tx,
-                        bool fLimitFree, bool *pfMissingInputs,
-                        bool fOverrideMempoolLimit = false,
-                        const Amount nAbsurdFee = Amount::zero(),
-                        bool test_accept = false)
+                        bool *pfMissingInputs, bool bypass_limits,
+                        const Amount nAbsurdFee, bool test_accept = false)
     EXCLUSIVE_LOCKS_REQUIRED(cs_main);
 
 /** Convert CValidationState to a human-readable message for logging */
 std::string FormatStateMessage(const CValidationState &state);
+
+/**
+ * Simple class for regulating resource usage during CheckInputs (and
+ * CScriptCheck), atomic so as to be compatible with parallel validation.
+ */
+class CheckInputsLimiter {
+protected:
+    std::atomic<int64_t> remaining;
+
+public:
+    CheckInputsLimiter(int64_t limit) : remaining(limit) {}
+
+    bool consume_and_check(int consumed) {
+        auto newvalue = (remaining -= consumed);
+        return newvalue >= 0;
+    }
+
+    bool check() { return remaining >= 0; }
+};
+
+class TxSigCheckLimiter : public CheckInputsLimiter {
+public:
+    TxSigCheckLimiter() : CheckInputsLimiter(MAX_TX_SIGCHECKS) {}
+
+    // Let's make this bad boy copiable.
+    TxSigCheckLimiter(const TxSigCheckLimiter &rhs)
+        : CheckInputsLimiter(rhs.remaining.load()) {}
+
+    TxSigCheckLimiter &operator=(const TxSigCheckLimiter &rhs) {
+        remaining = rhs.remaining.load();
+        return *this;
+    }
+};
 
 /**
  * Check whether all inputs of this transaction are valid (no double spends,
@@ -487,16 +492,74 @@ std::string FormatStateMessage(const CValidationState &state);
  * performed inline. Any script checks which are not necessary (eg due to script
  * execution cache hits) are, obviously, not pushed onto pvChecks/run.
  *
+ * Upon success nSigChecksOut will be filled in with either:
+ * - correct total for all inputs, or,
+ * - 0, in the case when checks were pushed onto pvChecks (i.e., a cache miss
+ * with pvChecks non-null), in which case the total can be found by executing
+ * pvChecks and adding the results.
+ *
  * Setting sigCacheStore/scriptCacheStore to false will remove elements from the
  * corresponding cache which are matched. This is useful for checking blocks
  * where we will likely never need the cache entry again.
+ *
+ * pLimitSigChecks can be passed to limit the sigchecks count either in parallel
+ * or serial validation. With pvChecks null (serial validation), breaking the
+ * pLimitSigChecks limit will abort evaluation early and return false. With
+ * pvChecks not-null (parallel validation): the cached nSigChecks may itself
+ * break the limit in which case false is returned, OR, each entry in the
+ * returned pvChecks must be executed exactly once in order to probe the limit
+ * accurately.
  */
 bool CheckInputs(const CTransaction &tx, CValidationState &state,
                  const CCoinsViewCache &view, bool fScriptChecks,
                  const uint32_t flags, bool sigCacheStore,
                  bool scriptCacheStore,
-                 const PrecomputedTransactionData &txdata,
-                 std::vector<CScriptCheck> *pvChecks = nullptr);
+                 const PrecomputedTransactionData &txdata, int &nSigChecksOut,
+                 TxSigCheckLimiter &txLimitSigChecks,
+                 CheckInputsLimiter *pBlockLimitSigChecks,
+                 std::vector<CScriptCheck> *pvChecks)
+    EXCLUSIVE_LOCKS_REQUIRED(cs_main);
+
+/**
+ * Handy shortcut to full fledged CheckInputs call.
+ */
+static inline bool
+CheckInputs(const CTransaction &tx, CValidationState &state,
+            const CCoinsViewCache &view, bool fScriptChecks,
+            const uint32_t flags, bool sigCacheStore, bool scriptCacheStore,
+            const PrecomputedTransactionData &txdata, int &nSigChecksOut)
+    EXCLUSIVE_LOCKS_REQUIRED(cs_main) {
+    TxSigCheckLimiter nSigChecksTxLimiter;
+    return CheckInputs(tx, state, view, fScriptChecks, flags, sigCacheStore,
+                       scriptCacheStore, txdata, nSigChecksOut,
+                       nSigChecksTxLimiter, nullptr, nullptr);
+}
+
+/** Get the BIP9 state for a given deployment at the current tip. */
+ThresholdState VersionBitsTipState(const Consensus::Params &params,
+                                   Consensus::DeploymentPos pos);
+
+/** Get the BIP9 state for a given deployment at a given block. */
+ThresholdState VersionBitsBlockState(const Consensus::Params &params,
+                                     Consensus::DeploymentPos pos,
+                                     const CBlockIndex *pindex);
+
+/**
+ * Get the numerical statistics for the BIP9 state for a given deployment at the
+ * current tip.
+ */
+BIP9Stats VersionBitsTipStatistics(const Consensus::Params &params,
+                                   Consensus::DeploymentPos pos);
+
+/**
+ * Get the block height at which the BIP9 deployment switched into the state for
+ * the block building on the current tip.
+ */
+int VersionBitsTipStateSinceHeight(const Consensus::Params &params,
+                                   Consensus::DeploymentPos pos);
+
+/** Apply the effects of this transaction on the UTXO set represented by view */
+void UpdateCoins(const CTransaction &tx, CCoinsViewCache &inputs, int nHeight);
 
 /**
  * Mark all the coins corresponding to a given transaction inputs as spent.
@@ -537,6 +600,9 @@ bool CheckSequenceLocks(const CTxMemPool &pool, const CTransaction &tx,
 /**
  * Closure representing one script verification.
  * Note that this stores references to the spending transaction.
+ *
+ * Note that if pLimitSigChecks is passed, then failure does not imply that
+ * scripts have failed.
  */
 class CScriptCheck {
 private:
@@ -547,20 +613,28 @@ private:
     uint32_t nFlags;
     bool cacheStore;
     ScriptError error;
+    ScriptExecutionMetrics metrics;
     PrecomputedTransactionData txdata;
+    TxSigCheckLimiter *pTxLimitSigChecks;
+    CheckInputsLimiter *pBlockLimitSigChecks;
 
 public:
     CScriptCheck()
         : amount(), ptxTo(nullptr), nIn(0), nFlags(0), cacheStore(false),
-          error(ScriptError::UNKNOWN), txdata() {}
+          error(ScriptError::UNKNOWN), txdata(), pTxLimitSigChecks(nullptr),
+          pBlockLimitSigChecks(nullptr) {}
 
     CScriptCheck(const CScript &scriptPubKeyIn, const Amount amountIn,
                  const CTransaction &txToIn, unsigned int nInIn,
                  uint32_t nFlagsIn, bool cacheIn,
-                 const PrecomputedTransactionData &txdataIn)
+                 const PrecomputedTransactionData &txdataIn,
+                 TxSigCheckLimiter *pTxLimitSigChecksIn = nullptr,
+                 CheckInputsLimiter *pBlockLimitSigChecksIn = nullptr)
         : scriptPubKey(scriptPubKeyIn), amount(amountIn), ptxTo(&txToIn),
           nIn(nInIn), nFlags(nFlagsIn), cacheStore(cacheIn),
-          error(ScriptError::UNKNOWN), txdata(txdataIn) {}
+          error(ScriptError::UNKNOWN), txdata(txdataIn),
+          pTxLimitSigChecks(pTxLimitSigChecksIn),
+          pBlockLimitSigChecks(pBlockLimitSigChecksIn) {}
 
     bool operator()();
 
@@ -572,10 +646,15 @@ public:
         std::swap(nFlags, check.nFlags);
         std::swap(cacheStore, check.cacheStore);
         std::swap(error, check.error);
+        std::swap(metrics, check.metrics);
         std::swap(txdata, check.txdata);
+        std::swap(pTxLimitSigChecks, check.pTxLimitSigChecks);
+        std::swap(pBlockLimitSigChecks, check.pBlockLimitSigChecks);
     }
 
     ScriptError GetScriptError() const { return error; }
+
+    ScriptExecutionMetrics GetScriptExecutionMetrics() const { return metrics; }
 };
 
 /** Functions for disk access for blocks */
@@ -609,17 +688,12 @@ bool ContextualCheckTransactionForCurrentBlock(const Consensus::Params &params,
 
 /**
  * Check a block is completely valid from start to finish (only works on top of
- * our current best block, with cs_main held)
+ * our current best block)
  */
 bool TestBlockValidity(CValidationState &state, const CChainParams &params,
                        const CBlock &block, CBlockIndex *pindexPrev,
-                       BlockValidationOptions validationOptions);
-
-/**
- * When there are blocks in the active chain with missing data, rewind the
- * chainstate and remove them from the block index.
- */
-bool RewindBlockIndex(const Config &config);
+                       BlockValidationOptions validationOptions)
+    EXCLUSIVE_LOCKS_REQUIRED(cs_main);
 
 /**
  * RAII wrapper for VerifyDB: Verify consistency of the block and coin
@@ -644,18 +718,18 @@ CBlockIndex *FindForkInGlobalIndex(const CChain &chain,
 /**
  * Mark a block as precious and reorganize.
  *
- * May not be called with cs_main held. May not be called in a
- * validationinterface callback.
+ * May not be called in a validationinterface callback.
  */
 bool PreciousBlock(const Config &config, CValidationState &state,
-                   CBlockIndex *pindex);
+                   CBlockIndex *pindex) LOCKS_EXCLUDED(cs_main);
 
 /**
  * Mark a block as finalized.
  * A finalized block can not be reorged in any way.
  */
 bool FinalizeBlockAndInvalidate(const Config &config, CValidationState &state,
-                                CBlockIndex *pindex);
+                                CBlockIndex *pindex)
+    EXCLUSIVE_LOCKS_REQUIRED(cs_main);
 
 /** Mark a block as invalid. */
 bool InvalidateBlock(const Config &config, CValidationState &state,
@@ -666,26 +740,29 @@ bool ParkBlock(const Config &config, CValidationState &state,
                CBlockIndex *pindex);
 
 /** Remove invalidity status from a block and its descendants. */
-void ResetBlockFailureFlags(CBlockIndex *pindex);
+void ResetBlockFailureFlags(CBlockIndex *pindex)
+    EXCLUSIVE_LOCKS_REQUIRED(cs_main);
 
 /** Remove parked status from a block and its descendants. */
-void UnparkBlockAndChildren(CBlockIndex *pindex);
+void UnparkBlockAndChildren(CBlockIndex *pindex)
+    EXCLUSIVE_LOCKS_REQUIRED(cs_main);
 
 /** Remove parked status from a block. */
-void UnparkBlock(CBlockIndex *pindex);
+void UnparkBlock(CBlockIndex *pindex) EXCLUSIVE_LOCKS_REQUIRED(cs_main);
 
 /**
  * Retrieve the topmost finalized block.
  */
-const CBlockIndex *GetFinalizedBlock();
+const CBlockIndex *GetFinalizedBlock() EXCLUSIVE_LOCKS_REQUIRED(cs_main);
 
 /**
  * Checks if a block is finalized.
  */
-bool IsBlockFinalized(const CBlockIndex *pindex);
+bool IsBlockFinalized(const CBlockIndex *pindex)
+    EXCLUSIVE_LOCKS_REQUIRED(cs_main);
 
-/** The currently-connected chain of blocks (protected by cs_main). */
-extern CChain &chainActive;
+/** @returns the most-work chain. */
+CChain &ChainActive();
 
 /**
  * Global variable that points to the coins database (protected by cs_main)
@@ -731,9 +808,12 @@ static const unsigned int REJECT_AGAINST_FINALIZED = 0x103;
 CBlockFileInfo *GetBlockFileInfo(size_t n);
 
 /** Dump the mempool to disk. */
-bool DumpMempool();
+bool DumpMempool(const CTxMemPool &pool);
 
 /** Load the mempool from disk. */
-bool LoadMempool(const Config &config);
+bool LoadMempool(const Config &config, CTxMemPool &pool);
+
+//! Check whether the block associated with this index entry is pruned or not.
+bool IsBlockPruned(const CBlockIndex *pblockindex);
 
 #endif // BITCOIN_VALIDATION_H

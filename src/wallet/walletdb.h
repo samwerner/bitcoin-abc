@@ -1,6 +1,6 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
 // Copyright (c) 2009-2016 The Bitcoin Core developers
-// Copyright (c) 2017 The Bitcoin developers
+// Copyright (c) 2017-2020 The Bitcoin developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -34,8 +34,6 @@
 
 static const bool DEFAULT_FLUSHWALLET = true;
 
-class CAccount;
-class CAccountingEntry;
 struct CBlockLocator;
 class CKeyPool;
 class CMasterKey;
@@ -63,8 +61,8 @@ class CHDChain {
 public:
     uint32_t nExternalChainCounter;
     uint32_t nInternalChainCounter;
-    //!< master key hash160
-    CKeyID masterKeyID;
+    //! seed hash160
+    CKeyID seed_id;
 
     static const int VERSION_HD_BASE = 1;
     static const int VERSION_HD_CHAIN_SPLIT = 2;
@@ -77,7 +75,7 @@ public:
     inline void SerializationOp(Stream &s, Operation ser_action) {
         READWRITE(this->nVersion);
         READWRITE(nExternalChainCounter);
-        READWRITE(masterKeyID);
+        READWRITE(seed_id);
         if (this->nVersion >= VERSION_HD_CHAIN_SPLIT) {
             READWRITE(nInternalChainCounter);
         }
@@ -87,7 +85,7 @@ public:
         nVersion = CHDChain::CURRENT_VERSION;
         nExternalChainCounter = 0;
         nInternalChainCounter = 0;
-        masterKeyID.SetNull();
+        seed_id.SetNull();
     }
 };
 
@@ -101,8 +99,8 @@ public:
     int64_t nCreateTime;
     // optional HD/bip32 keypath.
     std::string hdKeypath;
-    // Id of the HD masterkey used to derive this key.
-    CKeyID hdMasterKeyID;
+    // Id of the HD seed used to derive this key.
+    CKeyID hd_seed_id;
 
     CKeyMetadata() { SetNull(); }
     explicit CKeyMetadata(int64_t nCreateTime_) {
@@ -118,7 +116,7 @@ public:
         READWRITE(nCreateTime);
         if (this->nVersion >= VERSION_WITH_HDDATA) {
             READWRITE(hdKeypath);
-            READWRITE(hdMasterKeyID);
+            READWRITE(hd_seed_id);
         }
     }
 
@@ -126,7 +124,7 @@ public:
         nVersion = CKeyMetadata::CURRENT_VERSION;
         nCreateTime = 0;
         hdKeypath.clear();
-        hdMasterKeyID.SetNull();
+        hd_seed_id.SetNull();
     }
 };
 
@@ -195,23 +193,11 @@ public:
 
     bool WriteMinVersion(int nVersion);
 
-    /// This writes directly to the database, and will not update the CWallet's
-    /// cached accounting entries!
-    /// Use wallet.AddAccountingEntry instead, to write *and* update its caches.
-    bool WriteAccountingEntry(const uint64_t nAccEntryNum,
-                              const CAccountingEntry &acentry);
-    bool ReadAccount(const std::string &strAccount, CAccount &account);
-    bool WriteAccount(const std::string &strAccount, const CAccount &account);
-
     /// Write destination data key,value tuple to database.
     bool WriteDestData(const CTxDestination &address, const std::string &key,
                        const std::string &value);
     /// Erase destination data tuple from wallet database.
     bool EraseDestData(const CTxDestination &address, const std::string &key);
-
-    Amount GetAccountCreditDebit(const std::string &strAccount);
-    void ListAccountCreditDebit(const std::string &strAccount,
-                                std::list<CAccountingEntry> &acentries);
 
     DBErrors LoadWallet(CWallet *pwallet);
     DBErrors FindWalletTx(std::vector<TxId> &txIds,
@@ -248,6 +234,7 @@ public:
     //! write the hdchain model (external chain child index counter)
     bool WriteHDChain(const CHDChain &chain);
 
+    bool WriteWalletFlags(const uint64_t flags);
     //! Begin a new transaction
     bool TxnBegin();
     //! Commit current transaction

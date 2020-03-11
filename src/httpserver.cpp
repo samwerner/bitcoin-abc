@@ -1,5 +1,5 @@
 // Copyright (c) 2015-2016 The Bitcoin Core developers
-// Copyright (c) 2018 The Bitcoin developers
+// Copyright (c) 2018-2019 The Bitcoin developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -11,6 +11,7 @@
 #include <logging.h>
 #include <netbase.h>
 #include <rpc/protocol.h> // For HTTP status codes
+#include <shutdown.h>
 #include <sync.h>
 #include <ui_interface.h>
 #include <util/strencodings.h>
@@ -38,7 +39,8 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <future>
+#include <deque>
+#include <memory>
 
 /** Maximum size of http request (request line + headers) */
 static const size_t MAX_HEADERS_SIZE = 8192;
@@ -384,8 +386,8 @@ bool InitHTTPServer(Config &config) {
     // libevent doesn't support debug logging, in which case we should
     // clear the BCLog::LIBEVENT flag.
     if (!UpdateHTTPServerLogging(
-            GetLogger().WillLogCategory(BCLog::LIBEVENT))) {
-        GetLogger().DisableCategory(BCLog::LIBEVENT);
+            LogInstance().WillLogCategory(BCLog::LIBEVENT))) {
+        LogInstance().DisableCategory(BCLog::LIBEVENT);
     }
 
 #ifdef WIN32
@@ -449,7 +451,6 @@ bool UpdateHTTPServerLogging(bool enable) {
 }
 
 std::thread threadHTTP;
-std::future<bool> threadResult;
 static std::vector<std::thread> g_thread_http_workers;
 
 void StartHTTPServer() {
@@ -457,9 +458,7 @@ void StartHTTPServer() {
     int rpcThreads =
         std::max((long)gArgs.GetArg("-rpcthreads", DEFAULT_HTTP_THREADS), 1L);
     LogPrintf("HTTP: starting %d worker threads\n", rpcThreads);
-    std::packaged_task<bool(event_base *)> task(ThreadHTTP);
-    threadResult = task.get_future();
-    threadHTTP = std::thread(std::move(task), eventBase);
+    threadHTTP = std::thread(ThreadHTTP, eventBase);
 
     for (int i = 0; i < rpcThreads; i++) {
         g_thread_http_workers.emplace_back(HTTPWorkQueueRun, workQueue);
@@ -469,10 +468,6 @@ void StartHTTPServer() {
 void InterruptHTTPServer() {
     LogPrint(BCLog::HTTP, "Interrupting HTTP server\n");
     if (eventHTTP) {
-        // Unlisten sockets
-        for (evhttp_bound_socket *socket : boundSockets) {
-            evhttp_del_accept_socket(eventHTTP, socket);
-        }
         // Reject requests on current connections
         evhttp_set_gencb(eventHTTP, http_reject_request_cb, nullptr);
     }
@@ -492,24 +487,14 @@ void StopHTTPServer() {
         delete workQueue;
         workQueue = nullptr;
     }
+    // Unlisten sockets, these are what make the event loop running, which means
+    // that after this and all connections are closed the event loop will quit.
+    for (evhttp_bound_socket *socket : boundSockets) {
+        evhttp_del_accept_socket(eventHTTP, socket);
+    }
+    boundSockets.clear();
     if (eventBase) {
         LogPrint(BCLog::HTTP, "Waiting for HTTP event thread to exit\n");
-        // Exit the event loop as soon as there are no active events.
-        event_base_loopexit(eventBase, nullptr);
-        // Give event loop a few seconds to exit (to send back last RPC
-        // responses), then break it. Before this was solved with
-        // event_base_loopexit, but that didn't work as expected in at least
-        // libevent 2.0.21 and always introduced a delay. In libevent master
-        // that appears to be solved, so in the future that solution could be
-        // used again (if desirable).
-        // (see discussion in https://github.com/bitcoin/bitcoin/pull/6990)
-        if (threadResult.valid() &&
-            threadResult.wait_for(std::chrono::milliseconds(2000)) ==
-                std::future_status::timeout) {
-            LogPrintf("HTTP event loop did not exit within allotted time, "
-                      "sending loopbreak\n");
-            event_base_loopbreak(eventBase);
-        }
         threadHTTP.join();
     }
     if (eventHTTP) {
@@ -565,7 +550,8 @@ HTTPRequest::~HTTPRequest() {
     // evhttpd cleans up the request, as long as a reply was sent.
 }
 
-std::pair<bool, std::string> HTTPRequest::GetHeader(const std::string &hdr) {
+std::pair<bool, std::string>
+HTTPRequest::GetHeader(const std::string &hdr) const {
     const struct evkeyvalq *headers = evhttp_request_get_input_headers(req);
     assert(headers);
     const char *val = evhttp_find_header(headers, hdr.c_str());
@@ -614,6 +600,9 @@ void HTTPRequest::WriteHeader(const std::string &hdr,
  */
 void HTTPRequest::WriteReply(int nStatus, const std::string &strReply) {
     assert(!replySent && req);
+    if (ShutdownRequested()) {
+        WriteHeader("Connection", "close");
+    }
     // Send event to main http thread to send reply message
     struct evbuffer *evb = evhttp_request_get_output_buffer(req);
     assert(evb);
@@ -640,7 +629,7 @@ void HTTPRequest::WriteReply(int nStatus, const std::string &strReply) {
     req = nullptr;
 }
 
-CService HTTPRequest::GetPeer() {
+CService HTTPRequest::GetPeer() const {
     evhttp_connection *con = evhttp_request_get_connection(req);
     CService peer;
     if (con) {
@@ -653,11 +642,11 @@ CService HTTPRequest::GetPeer() {
     return peer;
 }
 
-std::string HTTPRequest::GetURI() {
+std::string HTTPRequest::GetURI() const {
     return evhttp_request_get_uri(req);
 }
 
-HTTPRequest::RequestMethod HTTPRequest::GetRequestMethod() {
+HTTPRequest::RequestMethod HTTPRequest::GetRequestMethod() const {
     switch (evhttp_request_get_command(req)) {
         case EVHTTP_REQ_GET:
             return GET;

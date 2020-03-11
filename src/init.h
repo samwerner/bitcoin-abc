@@ -1,6 +1,6 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
-// Copyright (c) 2009-2016 The Bitcoin Core developers
-// Copyright (c) 2018 The Bitcoin developers
+// Copyright (c) 2009-2018 The Bitcoin Core developers
+// Copyright (c) 2018-2019 The Bitcoin developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -18,18 +18,24 @@ class CWallet;
 class HTTPRPCRequestProcessor;
 class RPCServer;
 
-class WalletInitInterface;
-extern const WalletInitInterface &g_wallet_init_interface;
+namespace interfaces {
+class Chain;
+class ChainClient;
+} // namespace interfaces
+
+//! Pointers to interfaces used during init and destroyed on shutdown.
+struct InitInterfaces {
+    std::unique_ptr<interfaces::Chain> chain;
+    std::vector<std::unique_ptr<interfaces::ChainClient>> chain_clients;
+};
 
 namespace boost {
 class thread_group;
 } // namespace boost
 
-void StartShutdown();
-bool ShutdownRequested();
 /** Interrupt threads */
 void Interrupt();
-void Shutdown();
+void Shutdown(InitInterfaces &interfaces);
 //! Initialize the logging infrastructure
 void InitLogging();
 //! Parameter interaction: change current parameters depending on various rules
@@ -73,7 +79,8 @@ bool AppInitLockDataDirectory();
  * AppInitLockDataDirectory should have been called.
  */
 bool AppInitMain(Config &config, RPCServer &rpcServer,
-                 HTTPRPCRequestProcessor &httpRPCRequestProcessor);
+                 HTTPRPCRequestProcessor &httpRPCRequestProcessor,
+                 InitInterfaces &interfaces);
 
 /**
  * Setup the arguments for gArgs.

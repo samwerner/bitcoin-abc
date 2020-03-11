@@ -44,11 +44,10 @@ BOOST_AUTO_TEST_CASE(MempoolMinimumFeeEstimate) {
             tx.vin[0].nSequence = 10000 * blocknum + j;
             TxId txid = tx.GetId();
             mpool.addUnchecked(
-                txid, entry.Fee((j + 1) * DEFAULT_BLOCK_MIN_TX_FEE_PER_KB)
-                          .Time(GetTime())
-                          .Priority(0)
-                          .Height(blocknum)
-                          .FromTx(tx, &mpool));
+                entry.Fee((j + 1) * DEFAULT_BLOCK_MIN_TX_FEE_PER_KB)
+                    .Time(GetTime())
+                    .Height(blocknum)
+                    .FromTx(tx));
             CTransactionRef ptx = mpool.get(txid);
             block.push_back(ptx);
         }
@@ -79,12 +78,10 @@ BOOST_AUTO_TEST_CASE(MempoolMinimumFeeEstimate) {
         // Add new transaction to the mempool with a increasing fee
         // The average should end up as 1/2 * 100 *
         // DEFAULT_BLOCK_MIN_TX_FEE_PER_KB
-        mpool.addUnchecked(tx.GetId(),
-                           entry.Fee((i + 1) * DEFAULT_BLOCK_MIN_TX_FEE_PER_KB)
+        mpool.addUnchecked(entry.Fee((i + 1) * DEFAULT_BLOCK_MIN_TX_FEE_PER_KB)
                                .Time(GetTime())
-                               .Priority(0)
                                .Height(blocknum)
-                               .FromTx(tx, &mpool));
+                               .FromTx(tx));
     }
 
     // Trim to size.  GetMinFee should be more than 10000 *

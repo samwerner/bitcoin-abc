@@ -1,4 +1,4 @@
-// Copyright (c) 2018 The Bitcoin developers
+// Copyright (c) 2018-2019 The Bitcoin developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -22,6 +22,10 @@ static const int64_t AVALANCHE_TIME_STEP_MILLISECONDS = 10;
  * Maximum item count that can be polled at once.
  */
 static const size_t AVALANCHE_MAX_ELEMENT_POLL = 4096;
+
+// Unfortunately, the bitcoind codebase is full of global and we are kinda
+// forced into it here.
+std::unique_ptr<AvalancheProcessor> g_avalanche;
 
 bool VoteRecord::registerVote(NodeId nodeid, uint32_t error) {
     // We just got a new vote, so there is one less inflight request.
@@ -139,7 +143,7 @@ bool AvalancheProcessor::addBlockToReconcile(const CBlockIndex *pindex) {
             return false;
         }
 
-        isAccepted = chainActive.Contains(pindex);
+        isAccepted = ::ChainActive().Contains(pindex);
     }
 
     return vote_records.getWriteView()
@@ -223,7 +227,7 @@ bool AvalancheProcessor::registerVotes(
     {
         LOCK(cs_main);
         for (auto &v : votes) {
-            BlockMap::iterator mi = mapBlockIndex.find(v.GetHash());
+            BlockMap::iterator mi = mapBlockIndex.find(BlockHash(v.GetHash()));
             if (mi == mapBlockIndex.end()) {
                 // This should not happen, but just in case...
                 continue;
@@ -414,7 +418,7 @@ void AvalancheProcessor::clearTimedoutRequests() {
 
         {
             LOCK(cs_main);
-            BlockMap::iterator mi = mapBlockIndex.find(inv.hash);
+            BlockMap::iterator mi = mapBlockIndex.find(BlockHash(inv.hash));
             if (mi == mapBlockIndex.end()) {
                 continue;
             }

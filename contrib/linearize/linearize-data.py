@@ -17,7 +17,7 @@ import hashlib
 import datetime
 import time
 from collections import namedtuple
-from binascii import hexlify, unhexlify
+from binascii import unhexlify
 
 settings = {}
 
@@ -69,7 +69,7 @@ def calc_hash_str(blk_hdr):
     hash = calc_hdr_hash(blk_hdr)
     hash = bufreverse(hash)
     hash = wordreverse(hash)
-    hash_str = hexlify(hash).decode('utf-8')
+    hash_str = hash.hex()
     return hash_str
 
 
@@ -145,7 +145,8 @@ class BlockDataCopier:
 
     def writeBlock(self, inhdr, blk_hdr, rawblock):
         blockSizeOnDisk = len(inhdr) + len(blk_hdr) + len(rawblock)
-        if not self.fileOutput and ((self.outsz + blockSizeOnDisk) > self.maxOutSz):
+        if not self.fileOutput and (
+                (self.outsz + blockSizeOnDisk) > self.maxOutSz):
             self.outF.close()
             if self.setFileTime:
                 os.utime(self.outFname, (int(time.time()), self.highTS))
@@ -156,7 +157,8 @@ class BlockDataCopier:
 
         (blkDate, blkTS) = get_blk_dt(blk_hdr)
         if self.timestampSplit and (blkDate > self.lastDate):
-            print("New month " + blkDate.strftime("%Y-%m") + " @ " + self.hash_str)
+            print("New month " + blkDate.strftime("%Y-%m") +
+                  " @ " + self.hash_str)
             self.lastDate = blkDate
             if self.outF:
                 self.outF.close()
@@ -202,7 +204,8 @@ class BlockDataCopier:
         '''Find the next block to be written in the input, and copy it to the output.'''
         extent = self.blockExtents.pop(self.blkCountOut)
         if self.blkCountOut in self.outOfOrderData:
-            # If the data is cached, use it from memory and remove from the cache
+            # If the data is cached, use it from memory and remove from the
+            # cache
             rawblock = self.outOfOrderData.pop(self.blkCountOut)
             self.outOfOrderSize -= len(rawblock)
         else:  # Otherwise look up data on disk
@@ -230,7 +233,7 @@ class BlockDataCopier:
 
             inMagic = inhdr[:4]
             if (inMagic != self.settings['netmagic']):
-                print("Invalid magic: " + hexlify(inMagic).decode('utf-8'))
+                print("Invalid magic: " + inMagic.hex())
                 return
             inLenLE = inhdr[4:]
             su = struct.unpack("<I", inLenLE)
@@ -240,9 +243,10 @@ class BlockDataCopier:
                 self.inFn, self.inF.tell(), inhdr, blk_hdr, inLen)
 
             self.hash_str = calc_hash_str(blk_hdr)
-            if not self.hash_str in blkmap:
+            if self.hash_str not in blkmap:
                 # Because blocks can be written to files out-of-order as of 0.10, the script
-                # may encounter blocks it doesn't know about. Treat as debug output.
+                # may encounter blocks it doesn't know about. Treat as debug
+                # output.
                 if settings['debug_output'] == 'true':
                     print("Skipping unknown block " + self.hash_str)
                 self.inF.seek(inLen, os.SEEK_CUR)
@@ -271,7 +275,7 @@ class BlockDataCopier:
                 else:  # If no space in cache, seek forward
                     self.inF.seek(inLen, os.SEEK_CUR)
 
-        print("Done ({} blocks written)".format((self.blkCountOut)))
+        print("Done ({} blocks written)".format(self.blkCountOut))
 
 
 if __name__ == '__main__':

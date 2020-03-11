@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright (c) 2016 The Bitcoin Core developers
+# Copyright (c) 2016-2019 The Bitcoin Core developers
 # Distributed under the MIT software license, see the accompanying
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
 """Test the dumpwallet RPC."""
@@ -25,43 +25,51 @@ def read_dump(file_name, addrs, script_addrs, hd_master_addr_old):
             # only read non comment lines
             if line[0] != "#" and len(line) > 10:
                 # split out some data
-                key_label, comment = line.split("#")
-                # key = key_label.split(" ")[0]
-                keytype = key_label.split(" ")[2]
-                if len(comment) > 1:
-                    addr_keypath = comment.split(" addr=")[1]
-                    addr = addr_keypath.split(" ")[0]
+                key_date_label, comment = line.split("#")
+                key_date_label = key_date_label.split(" ")
+                # key = key_date_label[0]
+                date = key_date_label[1]
+                keytype = key_date_label[2]
+
+                imported_key = date == '1970-01-01T00:00:01Z'
+                if imported_key:
+                    # Imported keys have multiple addresses, no label (keypath) and timestamp
+                    # Skip them
+                    continue
+
+                addr_keypath = comment.split(" addr=")[1]
+                addr = addr_keypath.split(" ")[0]
+                keypath = None
+                if keytype == "inactivehdseed=1":
+                    # ensure the old master is still available
+                    assert hd_master_addr_old == addr
+                elif keytype == "hdseed=1":
+                    # ensure we have generated a new hd master key
+                    assert hd_master_addr_old != addr
+                    hd_master_addr_ret = addr
+                elif keytype == "script=1":
+                    # scripts don't have keypaths
                     keypath = None
-                    if keytype == "inactivehdmaster=1":
-                        # ensure the old master is still available
-                        assert(hd_master_addr_old == addr)
-                    elif keytype == "hdmaster=1":
-                        # ensure we have generated a new hd master key
-                        assert(hd_master_addr_old != addr)
-                        hd_master_addr_ret = addr
-                    elif keytype == "script=1":
-                        # scripts don't have keypaths
-                        keypath = None
-                    else:
-                        keypath = addr_keypath.rstrip().split("hdkeypath=")[1]
+                else:
+                    keypath = addr_keypath.rstrip().split("hdkeypath=")[1]
 
-                    # count key types
-                    for addrObj in addrs:
-                        if addrObj['address'] == addr and addrObj['hdkeypath'] == keypath and keytype == "label=":
-                            found_addr += 1
-                            break
-                        elif keytype == "change=1":
-                            found_addr_chg += 1
-                            break
-                        elif keytype == "reserve=1":
-                            found_addr_rsv += 1
-                            break
+                # count key types
+                for addrObj in addrs:
+                    if addrObj['address'] == addr and addrObj['hdkeypath'] == keypath and keytype == "label=":
+                        found_addr += 1
+                        break
+                    elif keytype == "change=1":
+                        found_addr_chg += 1
+                        break
+                    elif keytype == "reserve=1":
+                        found_addr_rsv += 1
+                        break
 
-                    # count scripts
-                    for script_addr in script_addrs:
-                        if script_addr == addr.rstrip() and keytype == "script=1":
-                            found_script_addr += 1
-                            break
+                # count scripts
+                for script_addr in script_addrs:
+                    if script_addr == addr.rstrip() and keytype == "script=1":
+                        found_script_addr += 1
+                        break
 
         return found_addr, found_script_addr, found_addr_chg, found_addr_rsv, hd_master_addr_ret
 
@@ -70,13 +78,13 @@ class WalletDumpTest(BitcoinTestFramework):
     def set_test_params(self):
         self.num_nodes = 1
         self.extra_args = [["-keypool=90"]]
+        self.rpc_timeout = 120
 
-    def setup_network(self, split=False):
-        # Use 1 minute timeout because the initial getnewaddress RPC can take
-        # longer than the default 30 seconds due to an expensive
-        # CWallet::TopUpKeyPool call, and the encryptwallet RPC made later in
-        # the test often takes even longer.
-        self.add_nodes(self.num_nodes, extra_args=self.extra_args, timewait=60)
+    def skip_test_if_missing_module(self):
+        self.skip_if_no_wallet()
+
+    def setup_network(self):
+        self.add_nodes(self.num_nodes, extra_args=self.extra_args)
         self.start_nodes()
 
     def run_test(self):
@@ -110,14 +118,13 @@ class WalletDumpTest(BitcoinTestFramework):
         assert_equal(found_addr, test_addr_count)
         # all scripts must be in the dump
         assert_equal(found_script_addr, 1)
-        # 50 blocks where mined
-        assert_equal(found_addr_chg, 50)
+        # 0 blocks where mined
+        assert_equal(found_addr_chg, 0)
         # 90 keys plus 100% internal keys
         assert_equal(found_addr_rsv, 90 * 2)
 
         # encrypt wallet, restart, unlock and dump
-        self.nodes[0].node_encrypt_wallet('test')
-        self.start_node(0)
+        self.nodes[0].encryptwallet('test')
         self.nodes[0].walletpassphrase('test', 10)
         # Should be a no-op:
         self.nodes[0].keypoolrefill()
@@ -129,7 +136,7 @@ class WalletDumpTest(BitcoinTestFramework):
         assert_equal(found_addr, test_addr_count)
         assert_equal(found_script_addr, 1)
         # old reserve keys are marked as change now
-        assert_equal(found_addr_chg, 90 * 2 + 50)
+        assert_equal(found_addr_chg, 90 * 2)
         assert_equal(found_addr_rsv, 90 * 2)
 
         # Overwriting should fail
@@ -142,14 +149,14 @@ class WalletDumpTest(BitcoinTestFramework):
 
         # Make sure the address is not IsMine before import
         result = self.nodes[0].getaddressinfo(multisig_addr)
-        assert(result['ismine'] == False)
+        assert result['ismine'] is False
 
         self.nodes[0].importwallet(os.path.abspath(
             tmpdir + "/node0/wallet.unencrypted.dump"))
 
         # Now check IsMine is true
         result = self.nodes[0].getaddressinfo(multisig_addr)
-        assert(result['ismine'] == True)
+        assert result['ismine'] is True
 
 
 if __name__ == '__main__':

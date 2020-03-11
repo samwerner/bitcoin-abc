@@ -28,17 +28,11 @@ static const bool DEFAULT_PRINTPRIORITY = false;
 
 struct CBlockTemplateEntry {
     CTransactionRef tx;
-    //!< Total real fees paid by the transaction and cached to avoid parent
-    //!< lookup
-    Amount txFee;
-    //!< Cached total size of the transaction to avoid reserializing transaction
-    size_t txSize;
-    //!< Cached total number of SigOps
-    uint64_t txSigOps;
+    Amount fees;
+    int64_t sigOpCount;
 
-    CBlockTemplateEntry(CTransactionRef _tx, Amount _fees, uint64_t _size,
-                        int64_t _sigOps)
-        : tx(_tx), txFee(_fees), txSize(_size), txSigOps(_sigOps) {}
+    CBlockTemplateEntry(CTransactionRef _tx, Amount _fees, int64_t _sigOpCount)
+        : tx(_tx), fees(_fees), sigOpCount(_sigOpCount){};
 };
 
 struct CBlockTemplate {
@@ -59,8 +53,10 @@ struct CTxMemPoolModifiedEntry {
 
     Amount GetModifiedFee() const { return iter->GetModifiedFee(); }
     uint64_t GetSizeWithAncestors() const { return nSizeWithAncestors; }
+    uint64_t GetVirtualSizeWithAncestors() const;
     Amount GetModFeesWithAncestors() const { return nModFeesWithAncestors; }
     size_t GetTxSize() const { return iter->GetTxSize(); }
+    size_t GetTxVirtualSize() const { return iter->GetTxVirtualSize(); }
     const CTransaction &GetTx() const { return iter->GetTx(); }
 
     CTxMemPool::txiter iter;
@@ -98,7 +94,7 @@ struct CompareTxIterByAncestorCount {
         if (a->GetCountWithAncestors() != b->GetCountWithAncestors()) {
             return a->GetCountWithAncestors() < b->GetCountWithAncestors();
         }
-        return CTxMemPool::CompareIteratorByHash()(a, b);
+        return CTxMemPool::CompareIteratorById()(a, b);
     }
 };
 
@@ -142,6 +138,7 @@ private:
 
     // Configuration parameters for the block size
     uint64_t nMaxGeneratedBlockSize;
+    uint64_t nMaxGeneratedBlockSigChecks;
     CFeeRate blockMinFeeRate;
 
     // Information on the current status of the block
@@ -156,12 +153,9 @@ private:
     int64_t nLockTimeCutoff;
     int64_t nMedianTimePast;
     const CChainParams &chainparams;
-    uint8_t nBlockPriorityPercentage;
+    bool fUseSigChecks;
 
     const CTxMemPool *mempool;
-
-    // Variables used for addPriorityTxs
-    int lastFewTxs;
 
 public:
     struct Options {
@@ -169,7 +163,6 @@ public:
         uint64_t nExcessiveBlockSize;
         uint64_t nMaxGeneratedBlockSize;
         CFeeRate blockMinFeeRate;
-        uint8_t nBlockPriorityPercentage;
     };
 
     BlockAssembler(const Config &config, const CTxMemPool &_mempool);
@@ -189,9 +182,14 @@ private:
     /** Add a tx to the block */
     void AddToBlock(CTxMemPool::txiter iter);
 
+    /**
+     * Calculate the "SigOps" limit for a given block size (may actually be the
+     * SigChecks limit which is independent of blockSize, depending on
+     * fUseSigChecks)
+     */
+    uint64_t MaxBlockSigOpsCountForSize(uint64_t blockSize) const;
+
     // Methods for how to add transactions to a block.
-    /** Add transactions based on tx "priority" */
-    void addPriorityTxs() EXCLUSIVE_LOCKS_REQUIRED(mempool->cs);
     /**
      * Add transactions based on feerate including unconfirmed ancestors.
      * Increments nPackagesSelected / nDescendantsUpdated with corresponding
@@ -200,25 +198,11 @@ private:
     void addPackageTxs(int &nPackagesSelected, int &nDescendantsUpdated)
         EXCLUSIVE_LOCKS_REQUIRED(mempool->cs);
 
-    /** Enum for the results from TestForBlock */
-    enum class TestForBlockResult : uint8_t {
-        TXFits = 0,
-        TXCantFit = 1,
-        BlockFinished = 3,
-    };
-
-    // helper function for addPriorityTxs
-    /** Test if tx will still "fit" in the block */
-    TestForBlockResult TestForBlock(CTxMemPool::txiter iter);
-    /** Test if tx still has unconfirmed parents not yet in block */
-    bool isStillDependent(CTxMemPool::txiter iter)
-        EXCLUSIVE_LOCKS_REQUIRED(mempool->cs);
-
     // helper functions for addPackageTxs()
     /** Remove confirmed (inBlock) entries from given set */
     void onlyUnconfirmed(CTxMemPool::setEntries &testSet);
     /** Test if a new package would "fit" in the block */
-    bool TestPackage(uint64_t packageSize, int64_t packageSigOpsCost) const;
+    bool TestPackage(uint64_t packageSize, int64_t packageSigOpCount) const;
     /**
      * Perform checks on each transaction in a package:
      * locktime, serialized size (if necessary). These checks should always

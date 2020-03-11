@@ -1,6 +1,6 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
 // Copyright (c) 2009-2016 The Bitcoin Core developers
-// Copyright (c) 2017-2018 The Bitcoin developers
+// Copyright (c) 2017-2019 The Bitcoin developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -302,29 +302,11 @@ static bool IsCompressedOrUncompressedPubKey(const valtype &vchPubKey) {
     }
 }
 
-static bool IsCompressedPubKey(const valtype &vchPubKey) {
-    if (vchPubKey.size() != CPubKey::COMPRESSED_PUBLIC_KEY_SIZE) {
-        // Non-canonical public key: invalid length for compressed key
-        return false;
-    }
-    if (vchPubKey[0] != 0x02 && vchPubKey[0] != 0x03) {
-        // Non-canonical public key: invalid prefix for compressed key
-        return false;
-    }
-    return true;
-}
-
 bool CheckPubKeyEncoding(const valtype &vchPubKey, uint32_t flags,
                          ScriptError *serror) {
     if ((flags & SCRIPT_VERIFY_STRICTENC) &&
         !IsCompressedOrUncompressedPubKey(vchPubKey)) {
         return set_error(serror, ScriptError::PUBKEYTYPE);
-    }
-    // Only compressed keys are accepted when
-    // SCRIPT_VERIFY_COMPRESSED_PUBKEYTYPE is enabled.
-    if ((flags & SCRIPT_VERIFY_COMPRESSED_PUBKEYTYPE) &&
-        !IsCompressedPubKey(vchPubKey)) {
-        return set_error(serror, ScriptError::NONCOMPRESSED_PUBKEY);
     }
     return true;
 }

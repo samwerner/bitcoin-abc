@@ -1,6 +1,6 @@
 // Copyright (c) 2010 Satoshi Nakamoto
 // Copyright (c) 2009-2016 The Bitcoin Core developers
-// Copyright (c) 2017-2018 The Bitcoin developers
+// Copyright (c) 2017-2020 The Bitcoin developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -14,6 +14,7 @@
 #include <util/system.h>
 
 #include <cassert>
+#include <memory>
 
 static CBlock CreateGenesisBlock(const char *pszTimestamp,
                                  const CScript &genesisOutputScript,
@@ -72,23 +73,16 @@ CBlock CreateGenesisBlock(uint32_t nTime, uint32_t nNonce, uint32_t nBits,
 /**
  * Main network
  */
-/**
- * What makes a good checkpoint block?
- * + Is surrounded by blocks with reasonable timestamps
- *   (no blocks before with a timestamp after, none after with
- *    timestamp before)
- * + Contains no strange transactions
- */
 class CMainParams : public CChainParams {
 public:
     CMainParams() {
-        strNetworkID = "main";
+        strNetworkID = CBaseChainParams::MAIN;
         consensus.nSubsidyHalvingInterval = 210000;
         // 00000000000000ce80a7e057163a4db1d5ad7b20fb6f598c9597b9665c8fb0d4 -
         // April 1, 2012
         consensus.BIP16Height = 173805;
         consensus.BIP34Height = 227931;
-        consensus.BIP34Hash = uint256S(
+        consensus.BIP34Hash = BlockHash::fromHex(
             "000000000000024b89b42a942fe0d9fea3bb44ab7bd1b19115dd6a759c0808b8");
         // 000000000000000004c2b624ed5d7756c508d90fd0da2c7c679febfa6c4735f0
         consensus.BIP65Height = 388381;
@@ -103,6 +97,58 @@ public:
         consensus.nPowTargetSpacing = 10 * 60;
         consensus.fPowAllowMinDifficultyBlocks = false;
         consensus.fPowNoRetargeting = false;
+
+        // nPowTargetTimespan / nPowTargetSpacing
+        consensus.nMinerConfirmationWindow = 2016;
+        consensus.vDeployments[Consensus::DEPLOYMENT_TESTDUMMY] = {
+            .bit = 28,
+            // 95% of 2016
+            .nActivationThreshold = 1916,
+            // January 1, 2008
+            .nStartTime = 1199145601,
+            // December 31, 2008
+            .nTimeout = 1230767999,
+        };
+        consensus.vDeployments[Consensus::DEPLOYEMENT_MINER_FUND] = {
+            .bit = 0,
+            // 66% of 2016
+            .nActivationThreshold = 1344,
+            // Nov 15, 2019 12:00:00 UTC
+            .nStartTime = 1573819200,
+            // May 15, 2020 12:00:00 UTC
+            .nTimeout = 1589544000,
+        };
+        consensus.vDeployments[Consensus::DEPLOYEMENT_MINER_FUND_ABC] = {
+            .bit = 1,
+            // 66% of 2016
+            .nActivationThreshold = 1344,
+            // Nov 15, 2019 12:00:00 UTC
+            .nStartTime = 1573819200,
+            // May 15, 2020 12:00:00 UTC
+            .nTimeout = 1589544000,
+        };
+        consensus.vDeployments[Consensus::DEPLOYEMENT_MINER_FUND_BCHD] = {
+            .bit = 2,
+            // 66% of 2016
+            .nActivationThreshold = 1344,
+            // Nov 15, 2019 12:00:00 UTC
+            .nStartTime = 1573819200,
+            // May 15, 2020 12:00:00 UTC
+            .nTimeout = 1589544000,
+        };
+        consensus
+            .vDeployments[Consensus::DEPLOYEMENT_MINER_FUND_ELECTRON_CASH] = {
+            .bit = 3,
+            // 66% of 2016
+            .nActivationThreshold = 1344,
+            // Nov 15, 2019 12:00:00 UTC
+            .nStartTime = 1573819200,
+            // May 15, 2020 12:00:00 UTC
+            .nTimeout = 1589544000,
+        };
+
+        // The miner fund is enabled by default on mainnet.
+        consensus.enableMinerFund = true;
 
         // The best chain should have at least this much work.
         consensus.nMinimumChainWork =
@@ -122,11 +168,14 @@ public:
         // November 15, 2018 hard fork
         consensus.magneticAnomalyHeight = 556766;
 
-        // Nov 15, 2019 12:00:00 UTC protocol upgrade
-        consensus.gravitonActivationTime = 1573819200;
+        // November 15, 2019 protocol upgrade
+        consensus.gravitonHeight = 609135;
 
         // May 15, 2020 12:00:00 UTC protocol upgrade
         consensus.phononActivationTime = 1589544000;
+
+        // Nov 15, 2020 12:00:00 UTC protocol upgrade
+        consensus.axionActivationTime = 1605441600;
 
         /**
          * The message start string is designed to be unlikely to occur in
@@ -188,47 +237,50 @@ public:
 
         checkpointData = {
             .mapCheckpoints = {
-                {11111, uint256S("0000000069e244f73d78e8fd29ba2fd2ed618bd6fa2ee"
-                                 "92559f542fdb26e7c1d")},
-                {33333, uint256S("000000002dd5588a74784eaa7ab0507a18ad16a236e7b"
-                                 "1ce69f00d7ddfb5d0a6")},
-                {74000, uint256S("0000000000573993a3c9e41ce34471c079dcf5f52a0e8"
-                                 "24a81e7f953b8661a20")},
-                {105000, uint256S("00000000000291ce28027faea320c8d2b054b2e0fe44"
-                                  "a773f3eefb151d6bdc97")},
-                {134444, uint256S("00000000000005b12ffd4cd315cd34ffd4a594f430ac"
-                                  "814c91184a0d42d2b0fe")},
-                {168000, uint256S("000000000000099e61ea72015e79632f216fe6cb33d7"
-                                  "899acb35b75c8303b763")},
-                {193000, uint256S("000000000000059f452a5f7340de6682a977387c1701"
-                                  "0ff6e6c3bd83ca8b1317")},
-                {210000, uint256S("000000000000048b95347e83192f69cf0366076336c6"
-                                  "39f9b7228e9ba171342e")},
-                {216116, uint256S("00000000000001b4f4b433e81ee46494af945cf96014"
-                                  "816a4e2370f11b23df4e")},
-                {225430, uint256S("00000000000001c108384350f74090433e7fcf79a606"
-                                  "b8e797f065b130575932")},
-                {250000, uint256S("000000000000003887df1f29024b06fc2200b55f8af8"
-                                  "f35453d7be294df2d214")},
-                {279000, uint256S("0000000000000001ae8c72a0b0c301f67e3afca10e81"
-                                  "9efa9041e458e9bd7e40")},
-                {295000, uint256S("00000000000000004d9b4ef50f0f9d686fd69db2e03a"
-                                  "f35a100370c64632a983")},
+                {11111, BlockHash::fromHex("0000000069e244f73d78e8fd29ba2fd2ed6"
+                                           "18bd6fa2ee92559f542fdb26e7c1d")},
+                {33333, BlockHash::fromHex("000000002dd5588a74784eaa7ab0507a18a"
+                                           "d16a236e7b1ce69f00d7ddfb5d0a6")},
+                {74000, BlockHash::fromHex("0000000000573993a3c9e41ce34471c079d"
+                                           "cf5f52a0e824a81e7f953b8661a20")},
+                {105000, BlockHash::fromHex("00000000000291ce28027faea320c8d2b0"
+                                            "54b2e0fe44a773f3eefb151d6bdc97")},
+                {134444, BlockHash::fromHex("00000000000005b12ffd4cd315cd34ffd4"
+                                            "a594f430ac814c91184a0d42d2b0fe")},
+                {168000, BlockHash::fromHex("000000000000099e61ea72015e79632f21"
+                                            "6fe6cb33d7899acb35b75c8303b763")},
+                {193000, BlockHash::fromHex("000000000000059f452a5f7340de6682a9"
+                                            "77387c17010ff6e6c3bd83ca8b1317")},
+                {210000, BlockHash::fromHex("000000000000048b95347e83192f69cf03"
+                                            "66076336c639f9b7228e9ba171342e")},
+                {216116, BlockHash::fromHex("00000000000001b4f4b433e81ee46494af"
+                                            "945cf96014816a4e2370f11b23df4e")},
+                {225430, BlockHash::fromHex("00000000000001c108384350f74090433e"
+                                            "7fcf79a606b8e797f065b130575932")},
+                {250000, BlockHash::fromHex("000000000000003887df1f29024b06fc22"
+                                            "00b55f8af8f35453d7be294df2d214")},
+                {279000, BlockHash::fromHex("0000000000000001ae8c72a0b0c301f67e"
+                                            "3afca10e819efa9041e458e9bd7e40")},
+                {295000, BlockHash::fromHex("00000000000000004d9b4ef50f0f9d686f"
+                                            "d69db2e03af35a100370c64632a983")},
                 // UAHF fork block.
-                {478558, uint256S("0000000000000000011865af4122fe3b144e2cbeea86"
-                                  "142e8ff2fb4107352d43")},
+                {478558, BlockHash::fromHex("0000000000000000011865af4122fe3b14"
+                                            "4e2cbeea86142e8ff2fb4107352d43")},
                 // Nov, 13 DAA activation block.
-                {504031, uint256S("0000000000000000011ebf65b60d0a3de80b8175be70"
-                                  "9d653b4c1a1beeb6ab9c")},
+                {504031, BlockHash::fromHex("0000000000000000011ebf65b60d0a3de8"
+                                            "0b8175be709d653b4c1a1beeb6ab9c")},
                 // Monolith activation.
-                {530359, uint256S("0000000000000000011ada8bd08f46074f44a8f15539"
-                                  "6f43e38acf9501c49103")},
+                {530359, BlockHash::fromHex("0000000000000000011ada8bd08f46074f"
+                                            "44a8f155396f43e38acf9501c49103")},
                 // Magnetic anomaly activation.
-                {556767, uint256S("0000000000000000004626ff6e3b936941d341c5932e"
-                                  "ce4357eeccac44e6d56c")},
+                {556767, BlockHash::fromHex("0000000000000000004626ff6e3b936941"
+                                            "d341c5932ece4357eeccac44e6d56c")},
                 // Great wall activation.
-                {582680, uint256S("000000000000000001b4b8e36aec7d4f9671a47872cb"
-                                  "9a74dc16ca398c7dcc18")},
+                {582680, BlockHash::fromHex("000000000000000001b4b8e36aec7d4f96"
+                                            "71a47872cb9a74dc16ca398c7dcc18")},
+                // Graviton activation.
+                {609136, BlockHash::fromHex("000000000000000000b48bb207faac5ac6"
+                                            "55c313e41ac909322eaa694f5bc5b1")},
             }};
 
         // Data as of block
@@ -241,7 +293,8 @@ public:
             // (the tx=... number in the ChainStateFlushed debug.log lines)
             248589038,
             // Estimated number of transactions per second after that timestamp.
-            3.2};
+            3.2,
+        };
     }
 };
 
@@ -251,12 +304,12 @@ public:
 class CTestNetParams : public CChainParams {
 public:
     CTestNetParams() {
-        strNetworkID = "test";
+        strNetworkID = CBaseChainParams::TESTNET;
         consensus.nSubsidyHalvingInterval = 210000;
         // 00000000040b4e986385315e14bee30ad876d8b47f748025b26683116d21aa65
         consensus.BIP16Height = 514;
         consensus.BIP34Height = 21111;
-        consensus.BIP34Hash = uint256S(
+        consensus.BIP34Hash = BlockHash::fromHex(
             "0000000023b3a96d3484e5abb3755c413e7d41500f8e2a5c3f0dd01299cd8ef8");
         // 00000000007f6655f22f98e72ed80d8b06dc761d5da09df0fa1dc4be4f861eb6
         consensus.BIP65Height = 581885;
@@ -271,6 +324,58 @@ public:
         consensus.nPowTargetSpacing = 10 * 60;
         consensus.fPowAllowMinDifficultyBlocks = true;
         consensus.fPowNoRetargeting = false;
+
+        // nPowTargetTimespan / nPowTargetSpacing
+        consensus.nMinerConfirmationWindow = 2016;
+        consensus.vDeployments[Consensus::DEPLOYMENT_TESTDUMMY] = {
+            .bit = 28,
+            // 75% of 2016
+            .nActivationThreshold = 1512,
+            // January 1, 2008
+            .nStartTime = 1199145601,
+            // December 31, 2008
+            .nTimeout = 1230767999,
+        };
+        consensus.vDeployments[Consensus::DEPLOYEMENT_MINER_FUND] = {
+            .bit = 0,
+            // 66% of 2016
+            .nActivationThreshold = 1344,
+            // Nov 15, 2019 12:00:00 UTC
+            .nStartTime = 1573819200,
+            // May 15, 2020 12:00:00 UTC
+            .nTimeout = 1589544000,
+        };
+        consensus.vDeployments[Consensus::DEPLOYEMENT_MINER_FUND_ABC] = {
+            .bit = 1,
+            // 66% of 2016
+            .nActivationThreshold = 1344,
+            // Nov 15, 2019 12:00:00 UTC
+            .nStartTime = 1573819200,
+            // May 15, 2020 12:00:00 UTC
+            .nTimeout = 1589544000,
+        };
+        consensus.vDeployments[Consensus::DEPLOYEMENT_MINER_FUND_BCHD] = {
+            .bit = 2,
+            // 66% of 2016
+            .nActivationThreshold = 1344,
+            // Nov 15, 2019 12:00:00 UTC
+            .nStartTime = 1573819200,
+            // May 15, 2020 12:00:00 UTC
+            .nTimeout = 1589544000,
+        };
+        consensus
+            .vDeployments[Consensus::DEPLOYEMENT_MINER_FUND_ELECTRON_CASH] = {
+            .bit = 3,
+            // 66% of 2016
+            .nActivationThreshold = 1344,
+            // Nov 15, 2019 12:00:00 UTC
+            .nStartTime = 1573819200,
+            // May 15, 2020 12:00:00 UTC
+            .nTimeout = 1589544000,
+        };
+
+        // The miner fund is disabled by default on testnet.
+        consensus.enableMinerFund = false;
 
         // The best chain should have at least this much work.
         consensus.nMinimumChainWork =
@@ -290,11 +395,14 @@ public:
         // November 15, 2018 hard fork
         consensus.magneticAnomalyHeight = 1267996;
 
-        // Nov 15, 2019 12:00:00 UTC protocol upgrade
-        consensus.gravitonActivationTime = 1573819200;
+        // November 15, 2019 protocol upgrade
+        consensus.gravitonHeight = 1341711;
 
         // May 15, 2020 12:00:00 UTC protocol upgrade
         consensus.phononActivationTime = 1589544000;
+
+        // Nov 15, 2020 12:00:00 UTC protocol upgrade
+        consensus.axionActivationTime = 1605441600;
 
         diskMagic[0] = 0x0b;
         diskMagic[1] = 0x11;
@@ -328,6 +436,8 @@ public:
         vSeeds.emplace_back("testnet-seed.bitprim.org");
         // Amaury SÉCHET
         vSeeds.emplace_back("testnet-seed.deadalnix.me");
+        // BCHD
+        vSeeds.emplace_back("testnet-seed.bchd.cash");
 
         base58Prefixes[PUBKEY_ADDRESS] = std::vector<uint8_t>(1, 111);
         base58Prefixes[SCRIPT_ADDRESS] = std::vector<uint8_t>(1, 196);
@@ -344,17 +454,24 @@ public:
 
         checkpointData = {
             .mapCheckpoints = {
-                {546, uint256S("000000002a936ca763904c3c35fce2f3556c559c0214345"
-                               "d31b1bcebf76acb70")},
+                {546, BlockHash::fromHex("000000002a936ca763904c3c35fce2f3556c5"
+                                         "59c0214345d31b1bcebf76acb70")},
                 // UAHF fork block.
-                {1155875, uint256S("00000000f17c850672894b9a75b63a1e72830bbd5f4"
-                                   "c8889b5c1a80e7faef138")},
+                {1155875,
+                 BlockHash::fromHex("00000000f17c850672894b9a75b63a1e72830bbd5f"
+                                    "4c8889b5c1a80e7faef138")},
                 // Nov, 13. DAA activation block.
-                {1188697, uint256S("0000000000170ed0918077bde7b4d36cc4c91be69fa"
-                                   "09211f748240dabe047fb")},
+                {1188697,
+                 BlockHash::fromHex("0000000000170ed0918077bde7b4d36cc4c91be69f"
+                                    "a09211f748240dabe047fb")},
                 // Great wall activation.
-                {1303885, uint256S("00000000000000479138892ef0e4fa478ccc938fb94"
-                                   "df862ef5bde7e8dee23d3")},
+                {1303885,
+                 BlockHash::fromHex("00000000000000479138892ef0e4fa478ccc938fb9"
+                                    "4df862ef5bde7e8dee23d3")},
+                // Graviton activation.
+                {1341712,
+                 BlockHash::fromHex("00000000fffc44ea2e202bd905a9fbbb9491ef9e9d"
+                                    "5a9eed4039079229afa35b")},
             }};
 
         // Data as of block
@@ -370,14 +487,14 @@ public:
 class CRegTestParams : public CChainParams {
 public:
     CRegTestParams() {
-        strNetworkID = "regtest";
+        strNetworkID = CBaseChainParams::REGTEST;
         consensus.nSubsidyHalvingInterval = 150;
         // always enforce P2SH BIP16 on regtest
         consensus.BIP16Height = 0;
         // BIP34 has not activated on regtest (far in the future so block v1 are
         // not rejected in tests)
         consensus.BIP34Height = 100000000;
-        consensus.BIP34Hash = uint256();
+        consensus.BIP34Hash = BlockHash();
         // BIP65 activated on regtest (Used in rpc activation tests)
         consensus.BIP65Height = 1351;
         // BIP66 activated on regtest (Used in rpc activation tests)
@@ -392,12 +509,60 @@ public:
         consensus.fPowAllowMinDifficultyBlocks = true;
         consensus.fPowNoRetargeting = true;
 
+        // Faster than normal for regtest (144 instead of 2016)
+        consensus.nMinerConfirmationWindow = 144;
+        consensus.vDeployments[Consensus::DEPLOYMENT_TESTDUMMY] = {
+            .bit = 28,
+            // 75% of 144
+            .nActivationThreshold = 108,
+        };
+        consensus.vDeployments[Consensus::DEPLOYEMENT_MINER_FUND] = {
+            .bit = 0,
+            // 66% of 144
+            .nActivationThreshold = 96,
+            // Nov 15, 2019 12:00:00 UTC
+            .nStartTime = 1573819200,
+            // May 15, 2020 12:00:00 UTC
+            .nTimeout = 1589544000,
+        };
+        consensus.vDeployments[Consensus::DEPLOYEMENT_MINER_FUND_ABC] = {
+            .bit = 1,
+            // 66% of 144
+            .nActivationThreshold = 96,
+            // Nov 15, 2019 12:00:00 UTC
+            .nStartTime = 1573819200,
+            // May 15, 2020 12:00:00 UTC
+            .nTimeout = 1589544000,
+        };
+        consensus.vDeployments[Consensus::DEPLOYEMENT_MINER_FUND_BCHD] = {
+            .bit = 2,
+            // 66% of 144
+            .nActivationThreshold = 96,
+            // Nov 15, 2019 12:00:00 UTC
+            .nStartTime = 1573819200,
+            // May 15, 2020 12:00:00 UTC
+            .nTimeout = 1589544000,
+        };
+        consensus
+            .vDeployments[Consensus::DEPLOYEMENT_MINER_FUND_ELECTRON_CASH] = {
+            .bit = 3,
+            // 66% of 144
+            .nActivationThreshold = 96,
+            // Nov 15, 2019 12:00:00 UTC
+            .nStartTime = 1573819200,
+            // May 15, 2020 12:00:00 UTC
+            .nTimeout = 1589544000,
+        };
+
+        // The miner fund is disabled by default on regnet.
+        consensus.enableMinerFund = false;
+
         // The best chain should have at least this much work.
         consensus.nMinimumChainWork = uint256S("0x00");
 
         // By default assume that the signatures in ancestors of this block are
         // valid.
-        consensus.defaultAssumeValid = uint256S("0x00");
+        consensus.defaultAssumeValid = BlockHash();
 
         // UAHF is always enabled on regtest.
         consensus.uahfHeight = 0;
@@ -408,11 +573,14 @@ public:
         // November 15, 2018 hard fork is always on on regtest.
         consensus.magneticAnomalyHeight = 0;
 
-        // Nov 15, 2019 12:00:00 UTC protocol upgrade
-        consensus.gravitonActivationTime = 1573819200;
+        // November 15, 2019 protocol upgrade
+        consensus.gravitonHeight = 0;
 
         // May 15, 2020 12:00:00 UTC protocol upgrade
         consensus.phononActivationTime = 1589544000;
+
+        // Nov 15, 2020 12:00:00 UTC protocol upgrade
+        consensus.axionActivationTime = 1605441600;
 
         diskMagic[0] = 0xfa;
         diskMagic[1] = 0xbf;
@@ -434,19 +602,20 @@ public:
                uint256S("0x4a5e1e4baab89f3a32518a88c31bc87f618f76673e2cc77ab212"
                         "7b7afdeda33b"));
 
-        //!< Regtest mode doesn't have any fixed seeds.
+        //! Regtest mode doesn't have any fixed seeds.
         vFixedSeeds.clear();
-        //!< Regtest mode doesn't have any DNS seeds.
+        //! Regtest mode doesn't have any DNS seeds.
         vSeeds.clear();
 
         fDefaultConsistencyChecks = true;
         fRequireStandard = false;
         fMineBlocksOnDemand = true;
 
-        checkpointData = {.mapCheckpoints = {
-                              {0, uint256S("0f9188f13cb7b2c71f2a335e3a4fc328bf5"
-                                           "beb436012afca590b1a11466e2206")},
-                          }};
+        checkpointData = {
+            .mapCheckpoints = {
+                {0, BlockHash::fromHex("0f9188f13cb7b2c71f2a335e3a4fc328bf5beb4"
+                                       "36012afca590b1a11466e2206")},
+            }};
 
         chainTxData = ChainTxData{0, 0, 0};
 
@@ -468,15 +637,15 @@ const CChainParams &Params() {
 
 std::unique_ptr<CChainParams> CreateChainParams(const std::string &chain) {
     if (chain == CBaseChainParams::MAIN) {
-        return std::unique_ptr<CChainParams>(new CMainParams());
+        return std::make_unique<CMainParams>();
     }
 
     if (chain == CBaseChainParams::TESTNET) {
-        return std::unique_ptr<CChainParams>(new CTestNetParams());
+        return std::make_unique<CTestNetParams>();
     }
 
     if (chain == CBaseChainParams::REGTEST) {
-        return std::unique_ptr<CChainParams>(new CRegTestParams());
+        return std::make_unique<CRegTestParams>();
     }
 
     throw std::runtime_error(

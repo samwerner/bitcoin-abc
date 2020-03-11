@@ -1,6 +1,6 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
 // Copyright (c) 2009-2016 The Bitcoin Core developers
-// Copyright (c) 2017-2018 The Bitcoin developers
+// Copyright (c) 2017-2020 The Bitcoin developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -102,7 +102,7 @@ static bool IsOpcodeDisabled(opcodetype opcode, uint32_t flags) {
 
 bool EvalScript(std::vector<valtype> &stack, const CScript &script,
                 uint32_t flags, const BaseSignatureChecker &checker,
-                ScriptError *serror) {
+                ScriptExecutionMetrics &metrics, ScriptError *serror) {
     static const CScriptNum bnZero(0);
     static const CScriptNum bnOne(1);
     static const valtype vchFalse(0);
@@ -190,13 +190,6 @@ bool EvalScript(std::vector<valtype> &stack, const CScript &script,
 
                     case OP_CHECKLOCKTIMEVERIFY: {
                         if (!(flags & SCRIPT_VERIFY_CHECKLOCKTIMEVERIFY)) {
-                            // not enabled; treat as a NOP2
-                            if (flags &
-                                SCRIPT_VERIFY_DISCOURAGE_UPGRADABLE_NOPS) {
-                                return set_error(
-                                    serror,
-                                    ScriptError::DISCOURAGE_UPGRADABLE_NOPS);
-                            }
                             break;
                         }
 
@@ -243,13 +236,6 @@ bool EvalScript(std::vector<valtype> &stack, const CScript &script,
 
                     case OP_CHECKSEQUENCEVERIFY: {
                         if (!(flags & SCRIPT_VERIFY_CHECKSEQUENCEVERIFY)) {
-                            // not enabled; treat as a NOP3
-                            if (flags &
-                                SCRIPT_VERIFY_DISCOURAGE_UPGRADABLE_NOPS) {
-                                return set_error(
-                                    serror,
-                                    ScriptError::DISCOURAGE_UPGRADABLE_NOPS);
-                            }
                             break;
                         }
 
@@ -888,19 +874,23 @@ bool EvalScript(std::vector<valtype> &stack, const CScript &script,
                             return false;
                         }
 
-                        // Subset of script starting at the most recent
-                        // codeseparator
-                        CScript scriptCode(pbegincodehash, pend);
+                        bool fSuccess = false;
+                        if (vchSig.size()) {
+                            // Subset of script starting at the most recent
+                            // codeseparator
+                            CScript scriptCode(pbegincodehash, pend);
 
-                        // Remove signature for pre-fork scripts
-                        CleanupScriptCode(scriptCode, vchSig, flags);
+                            // Remove signature for pre-fork scripts
+                            CleanupScriptCode(scriptCode, vchSig, flags);
 
-                        bool fSuccess = checker.CheckSig(vchSig, vchPubKey,
-                                                         scriptCode, flags);
+                            fSuccess = checker.CheckSig(vchSig, vchPubKey,
+                                                        scriptCode, flags);
+                            metrics.nSigChecks += 1;
 
-                        if (!fSuccess && (flags & SCRIPT_VERIFY_NULLFAIL) &&
-                            vchSig.size()) {
-                            return set_error(serror, ScriptError::SIG_NULLFAIL);
+                            if (!fSuccess && (flags & SCRIPT_VERIFY_NULLFAIL)) {
+                                return set_error(serror,
+                                                 ScriptError::SIG_NULLFAIL);
+                            }
                         }
 
                         popstack(stack);
@@ -943,11 +933,12 @@ bool EvalScript(std::vector<valtype> &stack, const CScript &script,
                                 .Finalize(vchHash.data());
                             fSuccess = checker.VerifySignature(
                                 vchSig, CPubKey(vchPubKey), uint256(vchHash));
-                        }
+                            metrics.nSigChecks += 1;
 
-                        if (!fSuccess && (flags & SCRIPT_VERIFY_NULLFAIL) &&
-                            vchSig.size()) {
-                            return set_error(serror, ScriptError::SIG_NULLFAIL);
+                            if (!fSuccess && (flags & SCRIPT_VERIFY_NULLFAIL)) {
+                                return set_error(serror,
+                                                 ScriptError::SIG_NULLFAIL);
+                            }
                         }
 
                         popstack(stack);
@@ -1097,6 +1088,10 @@ bool EvalScript(std::vector<valtype> &stack, const CScript &script,
                                     return set_error(serror,
                                                      ScriptError::SIG_NULLFAIL);
                                 }
+
+                                // this is guaranteed to execute exactly
+                                // nSigsCount times (if not script error)
+                                metrics.nSigChecks += 1;
                             }
 
                             if ((checkBits >> iKey) != 0) {
@@ -1107,18 +1102,6 @@ bool EvalScript(std::vector<valtype> &stack, const CScript &script,
                             }
                         } else {
                             // LEGACY MULTISIG (ECDSA / NULL)
-                            // A bug causes CHECKMULTISIG to consume one extra
-                            // argument whose contents were not checked in any
-                            // way.
-                            //
-                            // Unfortunately this is a potential source of
-                            // mutability, so optionally verify it is exactly
-                            // equal to zero.
-                            if ((flags & SCRIPT_VERIFY_NULLDUMMY) &&
-                                stacktop(-idxDummy).size()) {
-                                return set_error(serror,
-                                                 ScriptError::SIG_NULLDUMMY);
-                            }
 
                             // Remove signature for pre-fork scripts
                             for (int k = 0; k < nSigsCount; k++) {
@@ -1164,16 +1147,29 @@ bool EvalScript(std::vector<valtype> &stack, const CScript &script,
                                     fSuccess = false;
                                 }
                             }
-                        }
 
-                        // If the operation failed, we require that all
-                        // signatures must be empty vector
-                        if (!fSuccess && (flags & SCRIPT_VERIFY_NULLFAIL)) {
+                            bool areAllSignaturesNull = true;
                             for (int i = 0; i < nSigsCount; i++) {
                                 if (stacktop(-idxTopSig - i).size()) {
-                                    return set_error(serror,
-                                                     ScriptError::SIG_NULLFAIL);
+                                    areAllSignaturesNull = false;
+                                    break;
                                 }
+                            }
+
+                            // If the operation failed, we may require that all
+                            // signatures must be empty vector
+                            if (!fSuccess && (flags & SCRIPT_VERIFY_NULLFAIL) &&
+                                !areAllSignaturesNull) {
+                                return set_error(serror,
+                                                 ScriptError::SIG_NULLFAIL);
+                            }
+
+                            if (!areAllSignaturesNull) {
+                                // This is not identical to the number of actual
+                                // ECDSA verifies, but, it is an upper bound
+                                // that can be easily determined without doing
+                                // CPU-intensive checks.
+                                metrics.nSigChecks += nKeysCount;
                             }
                         }
 
@@ -1237,6 +1233,21 @@ bool EvalScript(std::vector<valtype> &stack, const CScript &script,
                         // Replace existing stack values by the new values.
                         stacktop(-2) = std::move(n1);
                         stacktop(-1) = std::move(n2);
+                    } break;
+
+                    case OP_REVERSEBYTES: {
+                        if (!(flags & SCRIPT_ENABLE_OP_REVERSEBYTES)) {
+                            return set_error(serror, ScriptError::BAD_OPCODE);
+                        }
+
+                        // (in -- out)
+                        if (stack.size() < 1) {
+                            return set_error(
+                                serror, ScriptError::INVALID_STACK_OPERATION);
+                        }
+
+                        valtype &data = stacktop(-1);
+                        std::reverse(data.begin(), data.end());
                     } break;
 
                     //
@@ -1333,13 +1344,13 @@ namespace {
  */
 template <class T> class CTransactionSignatureSerializer {
 private:
-    //!< reference to the spending transaction (the one being serialized)
+    //! reference to the spending transaction (the one being serialized)
     const T &txTo;
-    //!< output script being consumed
+    //! output script being consumed
     const CScript &scriptCode;
-    //!< input index of txTo being signed
+    //! input index of txTo being signed
     const unsigned int nIn;
-    //!< container for hashtype flags
+    //! container for hashtype flags
     const SigHashType sigHashType;
 
 public:
@@ -1696,7 +1707,7 @@ template class GenericTransactionSignatureChecker<CMutableTransaction>;
 
 bool VerifyScript(const CScript &scriptSig, const CScript &scriptPubKey,
                   uint32_t flags, const BaseSignatureChecker &checker,
-                  ScriptError *serror) {
+                  ScriptExecutionMetrics &metricsOut, ScriptError *serror) {
     set_error(serror, ScriptError::UNKNOWN);
 
     // If FORKID is enabled, we also ensure strict encoding.
@@ -1708,15 +1719,17 @@ bool VerifyScript(const CScript &scriptSig, const CScript &scriptPubKey,
         return set_error(serror, ScriptError::SIG_PUSHONLY);
     }
 
+    ScriptExecutionMetrics metrics = {};
+
     std::vector<valtype> stack, stackCopy;
-    if (!EvalScript(stack, scriptSig, flags, checker, serror)) {
+    if (!EvalScript(stack, scriptSig, flags, checker, metrics, serror)) {
         // serror is set
         return false;
     }
     if (flags & SCRIPT_VERIFY_P2SH) {
         stackCopy = stack;
     }
-    if (!EvalScript(stack, scriptPubKey, flags, checker, serror)) {
+    if (!EvalScript(stack, scriptPubKey, flags, checker, metrics, serror)) {
         // serror is set
         return false;
     }
@@ -1751,10 +1764,19 @@ bool VerifyScript(const CScript &scriptSig, const CScript &scriptPubKey,
         // pushed onto the stack.
         if ((flags & SCRIPT_DISALLOW_SEGWIT_RECOVERY) == 0 && stack.empty() &&
             pubKey2.IsWitnessProgram()) {
+            // must set metricsOut for all successful returns
+
+            // Prior to activation of this flag, all transactions will count as
+            // having a sigchecks count of 0 for accounting purposes outside of
+            // VerifyScript.
+            if (!(flags & SCRIPT_REPORT_SIGCHECKS)) {
+                metrics.nSigChecks = 0;
+            }
+            metricsOut = metrics;
             return set_success(serror);
         }
 
-        if (!EvalScript(stack, pubKey2, flags, checker, serror)) {
+        if (!EvalScript(stack, pubKey2, flags, checker, metrics, serror)) {
             // serror is set
             return false;
         }
@@ -1780,5 +1802,36 @@ bool VerifyScript(const CScript &scriptSig, const CScript &scriptPubKey,
         }
     }
 
+    if (flags & SCRIPT_VERIFY_INPUT_SIGCHECKS) {
+        // This limit is intended for standard use, and is based on an
+        // examination of typical and historical standard uses.
+        // - allowing P2SH ECDSA multisig with compressed keys, which at an
+        // extreme (1-of-15) may have 15 SigChecks in ~590 bytes of scriptSig.
+        // - allowing Bare ECDSA multisig, which at an extreme (1-of-3) may have
+        // 3 sigchecks in ~72 bytes of scriptSig.
+        // - Since the size of an input is 41 bytes + length of scriptSig, then
+        // the most dense possible inputs satisfying this rule would be:
+        //   2 sigchecks and 26 bytes: 1/33.50 sigchecks/byte.
+        //   3 sigchecks and 69 bytes: 1/36.66 sigchecks/byte.
+        // The latter can be readily done with 1-of-3 bare multisignatures,
+        // however the former is not practically doable with standard scripts,
+        // so the practical density limit is 1/36.66.
+        static_assert(INT_MAX > MAX_SCRIPT_SIZE,
+                      "overflow sanity check on max script size");
+        static_assert(INT_MAX / 43 / 3 > MAX_OPS_PER_SCRIPT,
+                      "overflow sanity check on maximum possible sigchecks "
+                      "from sig+redeem+pub scripts");
+        if (int(scriptSig.size()) < metrics.nSigChecks * 43 - 60) {
+            return set_error(serror, ScriptError::INPUT_SIGCHECKS);
+        }
+    }
+
+    // Prior to activation of this flag, all transactions will count as having a
+    // sigchecks count of 0 for accounting purposes outside of VerifyScript.
+    if (!(flags & SCRIPT_REPORT_SIGCHECKS)) {
+        metrics.nSigChecks = 0;
+    }
+
+    metricsOut = metrics;
     return set_success(serror);
 }

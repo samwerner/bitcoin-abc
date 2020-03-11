@@ -25,6 +25,10 @@ class WalletGroupTest(BitcoinTestFramework):
         self.setup_clean_chain = True
         self.num_nodes = 3
         self.extra_args = [[], [], ['-avoidpartialspends']]
+        self.rpc_timeout = 120
+
+    def skip_test_if_missing_module(self):
+        self.skip_if_no_wallet()
 
     def run_test(self):
         # Mine some coins
@@ -52,8 +56,7 @@ class WalletGroupTest(BitcoinTestFramework):
         assert_equal(1, len(tx1["vin"]))
         assert_equal(2, len(tx1["vout"]))
         # one output should be 0.2, the other should be ~0.3
-        v = [vout["value"] for vout in tx1["vout"]]
-        v.sort()
+        v = sorted([vout["value"] for vout in tx1["vout"]])
         assert_approx(v[0], 0.2)
         assert_approx(v[1], 0.3, 0.0001)
 
@@ -63,8 +66,7 @@ class WalletGroupTest(BitcoinTestFramework):
         assert_equal(2, len(tx2["vin"]))
         assert_equal(2, len(tx2["vout"]))
         # one output should be 0.2, the other should be ~1.3
-        v = [vout["value"] for vout in tx2["vout"]]
-        v.sort()
+        v = sorted([vout["value"] for vout in tx2["vout"]])
         assert_approx(v[0], 0.2)
         assert_approx(v[1], 1.3, 0.0001)
 
@@ -78,7 +80,7 @@ class WalletGroupTest(BitcoinTestFramework):
         # scriptPubKey
         for i in range(5):
             raw_tx = self.nodes[0].createrawtransaction(
-                [{"txid": "0"*64, "vout": 0}], [{addr2[0]: 0.05}])
+                [{"txid": "0" * 64, "vout": 0}], [{addr2[0]: 0.05}])
             tx = FromHex(CTransaction(), raw_tx)
             tx.vin = []
             tx.vout = [tx.vout[0]] * 2000

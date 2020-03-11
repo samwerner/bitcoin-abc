@@ -1,4 +1,4 @@
-// Copyright (c) 2018 The Bitcoin developers
+// Copyright (c) 2018-2019 The Bitcoin developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -8,7 +8,6 @@
 #include <cstdint>
 
 class CBlockIndex;
-class Config;
 
 namespace Consensus {
 struct Params;
@@ -31,5 +30,9 @@ bool IsMagneticAnomalyEnabled(const Consensus::Params &params,
 /** Check if Nov 15th, 2019 protocol upgrade has activated. */
 bool IsGravitonEnabled(const Consensus::Params &params,
                        const CBlockIndex *pindexPrev);
+
+/** Check if May 15th, 2020 protocol upgrade has activated. */
+bool IsPhononEnabled(const Consensus::Params &params,
+                     const CBlockIndex *pindexPrev);
 
 #endif // BITCOIN_CONSENSUS_ACTIVATION_H

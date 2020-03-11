@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Copyright (c) 2010 ArtForz -- public domain half-a-node
 # Copyright (c) 2012 Jeff Garzik
-# Copyright (c) 2010-2016 The Bitcoin Core developers
+# Copyright (c) 2010-2019 The Bitcoin Core developers
 # Distributed under the MIT software license, see the accompanying
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
 """Bitcoin P2P network half-a-node.
@@ -103,7 +103,8 @@ class P2PConnection(asyncio.Protocol):
 
     def __init__(self):
         # The underlying transport of the connection.
-        # Should only call methods on this from the NetworkThread, c.f. call_soon_threadsafe
+        # Should only call methods on this from the NetworkThread, c.f.
+        # call_soon_threadsafe
         self._transport = None
 
     @property
@@ -174,7 +175,7 @@ class P2PConnection(asyncio.Protocol):
 
         while True:
             msg = self._on_data()
-            if msg == None:
+            if msg is None:
                 break
             self.on_message(msg)
 
@@ -193,16 +194,17 @@ class P2PConnection(asyncio.Protocol):
                         "got garbage {}".format(repr(self.recvbuf)))
                 if len(self.recvbuf) < 4 + 12 + 4 + 4:
                     return None
-                command = self.recvbuf[4:4+12].split(b"\x00", 1)[0]
-                msglen = struct.unpack("<i", self.recvbuf[4+12:4+12+4])[0]
-                checksum = self.recvbuf[4+12+4:4+12+4+4]
+                command = self.recvbuf[4:4 + 12].split(b"\x00", 1)[0]
+                msglen = struct.unpack(
+                    "<i", self.recvbuf[4 + 12:4 + 12 + 4])[0]
+                checksum = self.recvbuf[4 + 12 + 4:4 + 12 + 4 + 4]
                 if len(self.recvbuf) < 4 + 12 + 4 + 4 + msglen:
                     return None
-                msg = self.recvbuf[4+12+4+4:4+12+4+4+msglen]
+                msg = self.recvbuf[4 + 12 + 4 + 4:4 + 12 + 4 + 4 + msglen]
                 h = sha256(sha256(msg))
                 if checksum != h[:4]:
                     raise ValueError("got bad checksum " + repr(self.recvbuf))
-                self.recvbuf = self.recvbuf[4+12+4+4+msglen:]
+                self.recvbuf = self.recvbuf[4 + 12 + 4 + 4 + msglen:]
                 if command not in MESSAGEMAP:
                     raise ValueError("Received unknown command from {}:{}: '{}' {}".format(
                         self.dstaddr, self.dstport, command, repr(msg)))
@@ -243,10 +245,7 @@ class P2PConnection(asyncio.Protocol):
         def maybe_write():
             if not self._transport:
                 return
-            # Python <3.4.4 does not have is_closing, so we have to check for
-            # its existence explicitly as long as Bitcoin ABC supports all
-            # Python 3.4 versions.
-            if hasattr(self._transport, 'is_closing') and self._transport.is_closing():
+            if self._transport.is_closing():
                 return
             self._transport.write(tmsg)
         NetworkThread.network_event_loop.call_soon_threadsafe(maybe_write)
@@ -304,7 +303,8 @@ class P2PInterface(P2PConnection):
         # The network services received from the peer
         self.nServices = 0
 
-    def peer_connect(self, *args, services=NODE_NETWORK, send_version=True, **kwargs):
+    def peer_connect(self, *args, services=NODE_NETWORK,
+                     send_version=True, **kwargs):
         create_conn = super().peer_connect(*args, **kwargs)
 
         if send_version:
@@ -333,7 +333,7 @@ class P2PInterface(P2PConnection):
                 self.message_count[command] += 1
                 self.last_message[command] = message
                 getattr(self, 'on_' + command)(message)
-            except:
+            except Exception:
                 print("ERROR delivering {} ({})".format(
                     repr(message), sys.exc_info()[0]))
                 raise
@@ -416,6 +416,15 @@ class P2PInterface(P2PConnection):
             "block") and self.last_message["block"].block.rehash() == blockhash
         wait_until(test_function, timeout=timeout, lock=mininode_lock)
 
+    def wait_for_header(self, blockhash, timeout=60):
+        def test_function():
+            last_headers = self.last_message.get('headers')
+            if not last_headers:
+                return False
+            return last_headers.headers[0].rehash() == blockhash
+
+        wait_until(test_function, timeout=timeout, lock=mininode_lock)
+
     def wait_for_getdata(self, timeout=60):
         """Waits for a getdata message.
 
@@ -482,7 +491,8 @@ class NetworkThread(threading.Thread):
 
     def __init__(self):
         super().__init__(name="NetworkThread")
-        # There is only one event loop and no more than one thread must be created
+        # There is only one event loop and no more than one thread must be
+        # created
         assert not self.network_event_loop
 
         NetworkThread.network_event_loop = asyncio.new_event_loop()
@@ -561,7 +571,8 @@ class P2PDataStore(P2PInterface):
         if response is not None:
             self.send_message(response)
 
-    def send_blocks_and_test(self, blocks, node, *, success=True, request_block=True, reject_reason=None, expect_disconnect=False, timeout=60):
+    def send_blocks_and_test(self, blocks, node, *, success=True, request_block=True,
+                             reject_reason=None, expect_disconnect=False, timeout=60):
         """Send blocks to test node and test whether the tip advances.
 
          - add all blocks to our block_store
@@ -592,12 +603,13 @@ class P2PDataStore(P2PInterface):
                 self.sync_with_ping()
 
             if success:
-                wait_until(lambda: node.getbestblockhash() ==
-                           blocks[-1].hash, timeout=timeout)
+                wait_until(lambda: node.getbestblockhash()
+                           == blocks[-1].hash, timeout=timeout)
             else:
                 assert node.getbestblockhash() != blocks[-1].hash
 
-    def send_txs_and_test(self, txs, node, *, success=True, expect_disconnect=False, reject_reason=None):
+    def send_txs_and_test(self, txs, node, *, success=True,
+                          expect_disconnect=False, reject_reason=None):
         """Send txs to test node and test whether they're accepted to the mempool.
 
          - add all txs to our tx_store

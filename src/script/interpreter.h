@@ -1,6 +1,6 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
 // Copyright (c) 2009-2016 The Bitcoin Core developers
-// Copyright (c) 2017-2018 The Bitcoin developers
+// Copyright (c) 2017-2020 The Bitcoin developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -10,6 +10,7 @@
 #include <primitives/transaction.h>
 #include <script/script_error.h>
 #include <script/script_flags.h>
+#include <script/script_metrics.h>
 #include <script/sighashtype.h>
 
 #include <cstdint>
@@ -84,10 +85,33 @@ using MutableTransactionSignatureChecker =
 
 bool EvalScript(std::vector<std::vector<uint8_t>> &stack, const CScript &script,
                 uint32_t flags, const BaseSignatureChecker &checker,
-                ScriptError *error = nullptr);
+                ScriptExecutionMetrics &metrics, ScriptError *error = nullptr);
+static inline bool EvalScript(std::vector<std::vector<uint8_t>> &stack,
+                              const CScript &script, uint32_t flags,
+                              const BaseSignatureChecker &checker,
+                              ScriptError *error = nullptr) {
+    ScriptExecutionMetrics dummymetrics;
+    return EvalScript(stack, script, flags, checker, dummymetrics, error);
+}
+
+/**
+ * Execute an unlocking and locking script together.
+ *
+ * Upon success, metrics will hold the accumulated script metrics.
+ * (upon failure, the results should not be relied on)
+ */
 bool VerifyScript(const CScript &scriptSig, const CScript &scriptPubKey,
                   uint32_t flags, const BaseSignatureChecker &checker,
+                  ScriptExecutionMetrics &metricsOut,
                   ScriptError *serror = nullptr);
+static inline bool VerifyScript(const CScript &scriptSig,
+                                const CScript &scriptPubKey, uint32_t flags,
+                                const BaseSignatureChecker &checker,
+                                ScriptError *serror = nullptr) {
+    ScriptExecutionMetrics dummymetrics;
+    return VerifyScript(scriptSig, scriptPubKey, flags, checker, dummymetrics,
+                        serror);
+}
 
 int FindAndDelete(CScript &script, const CScript &b);
 

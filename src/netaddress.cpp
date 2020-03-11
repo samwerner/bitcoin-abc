@@ -20,7 +20,6 @@ static const uint8_t g_internal_prefix[] = {0xFD, 0x6B, 0x88, 0xC0, 0x87, 0x24};
 
 CNetAddr::CNetAddr() {
     memset(ip, 0, sizeof(ip));
-    scopeId = 0;
 }
 
 void CNetAddr::SetIP(const CNetAddr &ipIn) {
@@ -164,12 +163,16 @@ bool CNetAddr::IsTor() const {
 
 bool CNetAddr::IsLocal() const {
     // IPv4 loopback
-    if (IsIPv4() && (GetByte(3) == 127 || GetByte(3) == 0)) return true;
+    if (IsIPv4() && (GetByte(3) == 127 || GetByte(3) == 0)) {
+        return true;
+    }
 
     // IPv6 loopback (::1/128)
     static const uint8_t pchLocal[16] = {0, 0, 0, 0, 0, 0, 0, 0,
                                          0, 0, 0, 0, 0, 0, 0, 1};
-    if (memcmp(ip, pchLocal, 16) == 0) return true;
+    if (memcmp(ip, pchLocal, 16) == 0) {
+        return true;
+    }
 
     return false;
 }
@@ -301,6 +304,9 @@ bool CNetAddr::GetInAddr(struct in_addr *pipv4Addr) const {
 }
 
 bool CNetAddr::GetIn6Addr(struct in6_addr *pipv6Addr) const {
+    if (!IsIPv6()) {
+        return false;
+    }
     memcpy(pipv6Addr, ip, 16);
     return true;
 }

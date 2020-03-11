@@ -12,6 +12,8 @@
 #include <sync.h>
 #include <validation.h> // for cs_main
 
+#include <algorithm>
+
 #include <QDebug>
 #include <QList>
 #include <QTimer>
@@ -21,7 +23,9 @@ bool NodeLessThan::operator()(const CNodeCombinedStats &left,
     const CNodeStats *pLeft = &(left.nodeStats);
     const CNodeStats *pRight = &(right.nodeStats);
 
-    if (order == Qt::DescendingOrder) std::swap(pLeft, pRight);
+    if (order == Qt::DescendingOrder) {
+        std::swap(pLeft, pRight);
+    }
 
     switch (column) {
         case PeerTableModel::NetNodeId:
@@ -73,8 +77,8 @@ public:
         if (sortColumn >= 0) {
             // sort cacheNodeStats (use stable sort to prevent rows jumping
             // around unnecessarily)
-            qStableSort(cachedNodeStats.begin(), cachedNodeStats.end(),
-                        NodeLessThan(sortColumn, sortOrder));
+            std::stable_sort(cachedNodeStats.begin(), cachedNodeStats.end(),
+                             NodeLessThan(sortColumn, sortOrder));
         }
 
         // build index map
@@ -89,22 +93,24 @@ public:
     int size() const { return cachedNodeStats.size(); }
 
     CNodeCombinedStats *index(int idx) {
-        if (idx >= 0 && idx < cachedNodeStats.size())
+        if (idx >= 0 && idx < cachedNodeStats.size()) {
             return &cachedNodeStats[idx];
+        }
 
-        return 0;
+        return nullptr;
     }
 };
 
 PeerTableModel::PeerTableModel(interfaces::Node &node, ClientModel *parent)
-    : QAbstractTableModel(parent), m_node(node), clientModel(parent), timer(0) {
+    : QAbstractTableModel(parent), m_node(node), clientModel(parent),
+      timer(nullptr) {
     columns << tr("NodeId") << tr("Node/Service") << tr("Ping") << tr("Sent")
             << tr("Received") << tr("User Agent");
     priv.reset(new PeerTablePriv());
 
     // set up timer for auto refresh
     timer = new QTimer(this);
-    connect(timer, SIGNAL(timeout()), SLOT(refresh()));
+    connect(timer, &QTimer::timeout, this, &PeerTableModel::refresh);
     timer->setInterval(MODEL_UPDATE_DELAY);
 
     // load initial data
@@ -134,7 +140,9 @@ int PeerTableModel::columnCount(const QModelIndex &parent) const {
 }
 
 QVariant PeerTableModel::data(const QModelIndex &index, int role) const {
-    if (!index.isValid()) return QVariant();
+    if (!index.isValid()) {
+        return QVariant();
+    }
 
     CNodeCombinedStats *rec =
         static_cast<CNodeCombinedStats *>(index.internalPointer());
@@ -179,7 +187,9 @@ QVariant PeerTableModel::headerData(int section, Qt::Orientation orientation,
 }
 
 Qt::ItemFlags PeerTableModel::flags(const QModelIndex &index) const {
-    if (!index.isValid()) return 0;
+    if (!index.isValid()) {
+        return Qt::NoItemFlags;
+    }
 
     Qt::ItemFlags retval = Qt::ItemIsSelectable | Qt::ItemIsEnabled;
     return retval;
@@ -190,7 +200,9 @@ QModelIndex PeerTableModel::index(int row, int column,
     Q_UNUSED(parent);
     CNodeCombinedStats *data = priv->index(row);
 
-    if (data) return createIndex(row, column, data);
+    if (data) {
+        return createIndex(row, column, data);
+    }
     return QModelIndex();
 }
 
@@ -206,7 +218,9 @@ void PeerTableModel::refresh() {
 
 int PeerTableModel::getRowByNodeId(NodeId nodeid) {
     std::map<NodeId, int>::iterator it = priv->mapNodeRows.find(nodeid);
-    if (it == priv->mapNodeRows.end()) return -1;
+    if (it == priv->mapNodeRows.end()) {
+        return -1;
+    }
 
     return it->second;
 }

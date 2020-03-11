@@ -1,3 +1,7 @@
+// Copyright (c) 2017-2020 The Bitcoin developers
+// Distributed under the MIT software license, see the accompanying
+// file COPYING or http://www.opensource.org/licenses/mit-license.php.
+
 #include <seeder/dns.h>
 
 #include <arpa/inet.h>
@@ -33,7 +37,10 @@ union control_data {
     uint8_t data[DSTADDR_DATASIZE];
 };
 
-typedef enum { CLASS_IN = 1, QCLASS_ANY = 255 } dns_class;
+typedef enum {
+    CLASS_IN = 1,
+    QCLASS_ANY = 255,
+} dns_class;
 
 typedef enum {
     TYPE_A = 1,
@@ -46,16 +53,26 @@ typedef enum {
     QTYPE_ANY = 255
 } dns_type;
 
-//  0: ok
-// -1: premature end of input, forward reference, component > 63 char, invalid
-// character
-// -2: insufficient space in output
-static int parse_name(const uint8_t **inpos, const uint8_t *inend,
-                      const uint8_t *inbuf, char *buf, size_t bufsize) {
+enum class DNSResponseCode : uint8_t {
+    OK = 0,
+    FORMAT_ERROR = 1,
+    SERVER_FAILURE = 2,
+    NAME_ERROR = 3,
+    NOT_IMPLEMENTED = 4,
+    REFUSED = 5,
+};
+
+int parse_name(const uint8_t **inpos, const uint8_t *inend,
+               const uint8_t *inbuf, char *buf, size_t bufsize) {
+    if (bufsize == 0) {
+        return -2;
+    }
     size_t bufused = 0;
     int init = 1;
     do {
-        if (*inpos == inend) return -1;
+        if (*inpos == inend) {
+            return -1;
+        }
         // read length of next component
         int octet = *((*inpos)++);
         if (octet == 0) {
@@ -64,26 +81,46 @@ static int parse_name(const uint8_t **inpos, const uint8_t *inend,
         }
         // add dot in output
         if (!init) {
-            if (bufused == bufsize - 1) return -2;
+            // The maximum size of a query name is 255. The buffer must have
+            // room for at least the '.' and a valid non-'.' character
+            if (bufused > 253) {
+                return -1;
+            }
+            if (bufused == bufsize - 1) {
+                return -2;
+            }
             buf[bufused++] = '.';
-        } else
+        } else {
             init = 0;
+        }
         // handle references
         if ((octet & 0xC0) == 0xC0) {
-            if (*inpos == inend) return -1;
+            if (*inpos == inend) {
+                return -1;
+            }
             int ref = ((octet - 0xC0) << 8) + *((*inpos)++);
-            if (ref < 0 || ref >= (*inpos) - inbuf - 2) return -1;
+            if (ref < 0 || ref >= (*inpos) - inbuf - 2) {
+                return -1;
+            }
             const uint8_t *newbuf = inbuf + ref;
             return parse_name(&newbuf, (*inpos) - 2, inbuf, buf + bufused,
                               bufsize - bufused);
         }
-        if (octet > 63) return -1;
+        if (octet > 63) {
+            return -1;
+        }
         // copy label
         while (octet) {
-            if (*inpos == inend) return -1;
-            if (bufused == bufsize - 1) return -2;
+            if (*inpos == inend || bufused > 254) {
+                return -1;
+            }
+            if (bufused == bufsize - 1) {
+                return -2;
+            }
             int c = *((*inpos)++);
-            if (c == '.') return -1;
+            if (c == '.') {
+                return -1;
+            }
             octet--;
             buf[bufused++] = c;
         }
@@ -99,22 +136,36 @@ static int write_name(uint8_t **outpos, const uint8_t *outend, const char *name,
     while (*name != 0) {
         const char *dot = strchr(name, '.');
         const char *fin = dot;
-        if (!dot) fin = name + strlen(name);
-        if (fin - name > 63) return -1;
-        if (fin == name) return -3;
-        if (outend - *outpos < fin - name + 2) return -2;
+        if (!dot) {
+            fin = name + strlen(name);
+        }
+        if (fin - name > 63) {
+            return -1;
+        }
+        if (fin == name) {
+            return -3;
+        }
+        if (outend - *outpos < fin - name + 2) {
+            return -2;
+        }
         *((*outpos)++) = fin - name;
         memcpy(*outpos, name, fin - name);
         *outpos += fin - name;
-        if (!dot) break;
+        if (!dot) {
+            break;
+        }
         name = dot + 1;
     }
     if (offset < 0) {
         // no reference
-        if (outend == *outpos) return -2;
+        if (outend == *outpos) {
+            return -2;
+        }
         *((*outpos)++) = 0;
     } else {
-        if (outend - *outpos < 2) return -2;
+        if (outend - *outpos < 2) {
+            return -2;
+        }
         *((*outpos)++) = (offset >> 8) | 0xC0;
         *((*outpos)++) = offset & 0xFF;
     }
@@ -156,11 +207,15 @@ error:
 static int write_record_a(uint8_t **outpos, const uint8_t *outend,
                           const char *name, int offset, dns_class cls, int ttl,
                           const addr_t *ip) {
-    if (ip->v != 4) return -6;
+    if (ip->v != 4) {
+        return -6;
+    }
     uint8_t *oldpos = *outpos;
     int error = 0;
     int ret = write_record(outpos, outend, name, offset, TYPE_A, cls, ttl);
-    if (ret) return ret;
+    if (ret) {
+        return ret;
+    }
     if (outend - *outpos < 6) {
         error = -5;
         goto error;
@@ -169,8 +224,9 @@ static int write_record_a(uint8_t **outpos, const uint8_t *outend,
     *((*outpos)++) = 0;
     *((*outpos)++) = 4;
     // rdata
-    for (int i = 0; i < 4; i++)
+    for (int i = 0; i < 4; i++) {
         *((*outpos)++) = ip->data.v4[i];
+    }
     return 0;
 error:
     *outpos = oldpos;
@@ -180,11 +236,15 @@ error:
 static int write_record_aaaa(uint8_t **outpos, const uint8_t *outend,
                              const char *name, int offset, dns_class cls,
                              int ttl, const addr_t *ip) {
-    if (ip->v != 6) return -6;
+    if (ip->v != 6) {
+        return -6;
+    }
     uint8_t *oldpos = *outpos;
     int error = 0;
     int ret = write_record(outpos, outend, name, offset, TYPE_AAAA, cls, ttl);
-    if (ret) return ret;
+    if (ret) {
+        return ret;
+    }
     if (outend - *outpos < 6) {
         error = -5;
         goto error;
@@ -193,8 +253,9 @@ static int write_record_aaaa(uint8_t **outpos, const uint8_t *outend,
     *((*outpos)++) = 0;
     *((*outpos)++) = 16;
     // rdata
-    for (int i = 0; i < 16; i++)
+    for (int i = 0; i < 16; i++) {
         *((*outpos)++) = ip->data.v6[i];
+    }
     return 0;
 error:
     *outpos = oldpos;
@@ -306,7 +367,7 @@ error:
 
 static ssize_t dnshandle(dns_opt_t *opt, const uint8_t *inbuf, size_t insize,
                          uint8_t *outbuf) {
-    int error = 0;
+    DNSResponseCode responseCode = DNSResponseCode::OK;
     if (insize < 12) {
         // DNS header
         return -1;
@@ -323,19 +384,19 @@ static ssize_t dnshandle(dns_opt_t *opt, const uint8_t *inbuf, size_t insize,
     // copy flags;
     outbuf[2] = inbuf[2];
     outbuf[3] = inbuf[3];
-    // clear error
+    // clear response code
     outbuf[3] &= ~15;
     // check qr
     if (inbuf[2] & 128) {
         /* fprintf(stdout, "Got response?\n"); */
-        error = 1;
+        responseCode = DNSResponseCode::FORMAT_ERROR;
         goto error;
     }
 
     // check opcode
     if (((inbuf[2] & 120) >> 3) != 0) {
         /* fprintf(stdout, "Opcode nonzero?\n"); */
-        error = 4;
+        responseCode = DNSResponseCode::NOT_IMPLEMENTED;
         goto error;
     }
 
@@ -347,13 +408,13 @@ static ssize_t dnshandle(dns_opt_t *opt, const uint8_t *inbuf, size_t insize,
     nquestion = (inbuf[4] << 8) + inbuf[5];
     if (nquestion == 0) {
         /* fprintf(stdout, "No questions?\n"); */
-        error = 0;
+        responseCode = DNSResponseCode::OK;
         goto error;
     }
 
     if (nquestion > 1) {
         /* fprintf(stdout, "Multiple questions %i?\n", nquestion); */
-        error = 4;
+        responseCode = DNSResponseCode::NOT_IMPLEMENTED;
         goto error;
     }
 
@@ -364,12 +425,12 @@ static ssize_t dnshandle(dns_opt_t *opt, const uint8_t *inbuf, size_t insize,
         int offset = inpos - inbuf;
         int ret = parse_name(&inpos, inend, inbuf, name, 256);
         if (ret == -1) {
-            error = 1;
+            responseCode = DNSResponseCode::FORMAT_ERROR;
             goto error;
         }
 
         if (ret == -2) {
-            error = 5;
+            responseCode = DNSResponseCode::REFUSED;
             goto error;
         }
 
@@ -377,12 +438,12 @@ static ssize_t dnshandle(dns_opt_t *opt, const uint8_t *inbuf, size_t insize,
         if (strcasecmp(name, opt->host) &&
             (namel < hostl + 2 || name[namel - hostl - 1] != '.' ||
              strcasecmp(name + namel - hostl, opt->host))) {
-            error = 5;
+            responseCode = DNSResponseCode::REFUSED;
             goto error;
         }
 
         if (inend - inpos < 4) {
-            error = 1;
+            responseCode = DNSResponseCode::FORMAT_ERROR;
             goto error;
         }
 
@@ -423,8 +484,9 @@ static ssize_t dnshandle(dns_opt_t *opt, const uint8_t *inbuf, size_t insize,
             write_record_soa(&newpos, outend, "", offset, CLASS_IN, opt->nsttl,
                              opt->ns, opt->mbox, time(NULL), 604800, 86400,
                              2592000, 604800);
-            if (max_auth_size < newpos - outpos)
+            if (max_auth_size < newpos - outpos) {
                 max_auth_size = newpos - outpos;
+            }
             //    fprintf(stdout, "Authority section will claim %i bytes max\n",
             //    max_auth_size);
         }
@@ -515,8 +577,8 @@ static ssize_t dnshandle(dns_opt_t *opt, const uint8_t *inbuf, size_t insize,
     }
 
 error:
-    // set error
-    outbuf[3] |= error & 0xF;
+    // set response code
+    outbuf[3] |= uint8_t(responseCode) & 0xF;
     // set counts
     outbuf[4] = 0;
     outbuf[5] = 0;
@@ -535,7 +597,9 @@ int dnsserver(dns_opt_t *opt) {
     struct sockaddr_in6 si_other;
     int senderSocket = -1;
     senderSocket = socket(AF_INET6, SOCK_DGRAM, IPPROTO_UDP);
-    if (senderSocket == -1) return -3;
+    if (senderSocket == -1) {
+        return -3;
+    }
 
     int replySocket;
     if (listenSocket == -1) {
@@ -556,8 +620,10 @@ int dnsserver(dns_opt_t *opt) {
         si_me.sin6_family = AF_INET6;
         si_me.sin6_port = htons(opt->port);
         si_me.sin6_addr = in6addr_any;
-        if (bind(listenSocket, (struct sockaddr *)&si_me, sizeof(si_me)) == -1)
+        if (bind(listenSocket, (struct sockaddr *)&si_me, sizeof(si_me)) ==
+            -1) {
             return -2;
+        }
     }
 
     uint8_t inbuf[BUFLEN], outbuf[BUFLEN];
@@ -583,10 +649,14 @@ int dnsserver(dns_opt_t *opt) {
         //    fprintf(stdout, "DNS: Request %llu from %i.%i.%i.%i:%i of %i
         //    bytes\n", (unsigned long long)(opt->nRequests), addr[0], addr[1],
         //    addr[2], addr[3], ntohs(si_other.sin_port), (int)insize);
-        if (insize <= 0) continue;
+        if (insize <= 0) {
+            continue;
+        }
 
         ssize_t ret = dnshandle(opt, inbuf, insize, outbuf);
-        if (ret <= 0) continue;
+        if (ret <= 0) {
+            continue;
+        }
 
         bool handled = false;
         for (struct cmsghdr *hdr = CMSG_FIRSTHDR(&msg); hdr;
@@ -601,9 +671,10 @@ int dnsserver(dns_opt_t *opt) {
                 handled = true;
             }
         }
-        if (!handled)
+        if (!handled) {
             sendto(listenSocket, outbuf, ret, 0, (struct sockaddr *)&si_other,
                    sizeof(si_other));
+        }
     }
     return 0;
 }

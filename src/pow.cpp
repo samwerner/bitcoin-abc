@@ -1,6 +1,6 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
 // Copyright (c) 2009-2016 The Bitcoin Core developers
-// Copyright (c) 2017 The Bitcoin developers
+// Copyright (c) 2017-2020 The Bitcoin developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -83,7 +83,9 @@ static uint32_t GetNextEDAWorkRequired(const CBlockIndex *pindexPrev,
 
     // Make sure we do not go below allowed values.
     const arith_uint256 bnPowLimit = UintToArith256(params.powLimit);
-    if (nPow > bnPowLimit) nPow = bnPowLimit;
+    if (nPow > bnPowLimit) {
+        nPow = bnPowLimit;
+    }
 
     return nPow.GetCompact();
 }

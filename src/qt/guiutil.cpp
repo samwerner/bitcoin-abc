@@ -46,10 +46,10 @@
 #include <QClipboard>
 #include <QDateTime>
 #include <QDesktopServices>
-#include <QDesktopWidget>
 #include <QDoubleValidator>
 #include <QFileDialog>
 #include <QFont>
+#include <QKeyEvent>
 #include <QLineEdit>
 #include <QMouseEvent>
 #include <QSettings>
@@ -62,9 +62,12 @@
 #endif
 
 #if defined(Q_OS_MAC)
-// These Mac includes must be done in the global namespace
-#include <CoreFoundation/CoreFoundation.h>
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+
 #include <CoreServices/CoreServices.h>
+
+void ForceActivation();
 #endif
 
 namespace GUIUtil {
@@ -208,7 +211,12 @@ bool parseBitcoinURI(const QString &scheme, QString uri,
 }
 
 QString formatBitcoinURI(const SendCoinsRecipient &info) {
-    QString ret = convertToCashAddr(Params(), info.address);
+    return formatBitcoinURI(Params(), info);
+}
+
+QString formatBitcoinURI(const CChainParams &params,
+                         const SendCoinsRecipient &info) {
+    QString ret = convertToCashAddr(params, info.address);
     int paramCount = 0;
 
     if (info.amount != Amount::zero()) {
@@ -370,6 +378,23 @@ bool isObscured(QWidget *w) {
              checkPoint(QPoint(w->width() / 2, w->height() / 2), w));
 }
 
+void bringToFront(QWidget *w) {
+#ifdef Q_OS_MAC
+    ForceActivation();
+#endif
+
+    if (w) {
+        // activateWindow() (sometimes) helps with keyboard focus on Windows
+        if (w->isMinimized()) {
+            w->showNormal();
+        } else {
+            w->show();
+        }
+        w->activateWindow();
+        w->raise();
+    }
+}
+
 void openDebugLogfile() {
     fs::path pathDebug = GetDataDir() / "debug.log";
 
@@ -419,22 +444,20 @@ bool ToolTipToRichTextFilter::eventFilter(QObject *obj, QEvent *evt) {
 }
 
 void TableViewLastColumnResizingFixer::connectViewHeadersSignals() {
-    connect(tableView->horizontalHeader(),
-            SIGNAL(sectionResized(int, int, int)), this,
-            SLOT(on_sectionResized(int, int, int)));
-    connect(tableView->horizontalHeader(), SIGNAL(geometriesChanged()), this,
-            SLOT(on_geometriesChanged()));
+    connect(tableView->horizontalHeader(), &QHeaderView::sectionResized, this,
+            &TableViewLastColumnResizingFixer::on_sectionResized);
+    connect(tableView->horizontalHeader(), &QHeaderView::geometriesChanged,
+            this, &TableViewLastColumnResizingFixer::on_geometriesChanged);
 }
 
 // We need to disconnect these while handling the resize events, otherwise we
 // can enter infinite loops.
 void TableViewLastColumnResizingFixer::disconnectViewHeadersSignals() {
-    disconnect(tableView->horizontalHeader(),
-               SIGNAL(sectionResized(int, int, int)), this,
-               SLOT(on_sectionResized(int, int, int)));
-    disconnect(tableView->horizontalHeader(), SIGNAL(geometriesChanged()), this,
-               SLOT(on_geometriesChanged()));
-}
+    disconnect(tableView->horizontalHeader(), &QHeaderView::sectionResized,
+               this, &TableViewLastColumnResizingFixer::on_sectionResized);
+    disconnect(tableView->horizontalHeader(), &QHeaderView::geometriesChanged,
+               this, &TableViewLastColumnResizingFixer::on_geometriesChanged);
+} // namespace GUIUtil
 
 // Setup the resize mode, handles compatibility for Qt5 and below as the method
 // signatures changed.
@@ -709,8 +732,6 @@ bool SetStartOnSystemStartup(bool fAutoStart) {
 }
 
 #elif defined(Q_OS_MAC)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 // based on:
 // https://github.com/Mozketo/LaunchAtLoginController/blob/master/LaunchAtLoginController.m
 
@@ -947,6 +968,23 @@ void ClickableLabel::mouseReleaseEvent(QMouseEvent *event) {
 
 void ClickableProgressBar::mouseReleaseEvent(QMouseEvent *event) {
     Q_EMIT clicked(event->pos());
+}
+
+bool ItemDelegate::eventFilter(QObject *object, QEvent *event) {
+    if (event->type() == QEvent::KeyPress) {
+        if (static_cast<QKeyEvent *>(event)->key() == Qt::Key_Escape) {
+            Q_EMIT keyEscapePressed();
+        }
+    }
+    return QItemDelegate::eventFilter(object, event);
+}
+
+int TextWidth(const QFontMetrics &fm, const QString &text) {
+#if (QT_VERSION >= QT_VERSION_CHECK(5, 11, 0))
+    return fm.horizontalAdvance(text);
+#else
+    return fm.width(text);
+#endif
 }
 
 } // namespace GUIUtil

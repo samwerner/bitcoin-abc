@@ -16,14 +16,8 @@ class CScript;
 /** IsMine() return codes */
 enum isminetype {
     ISMINE_NO = 0,
-    //! Indicates that we don't know how to create a scriptSig that would solve
-    //! this if we were given the appropriate private keys
-    ISMINE_WATCH_UNSOLVABLE = 1,
-    //! Indicates that we know how to create a scriptSig that would solve this
-    //! if we were given the appropriate private keys
-    ISMINE_WATCH_SOLVABLE = 2,
-    ISMINE_WATCH_ONLY = ISMINE_WATCH_SOLVABLE | ISMINE_WATCH_UNSOLVABLE,
-    ISMINE_SPENDABLE = 4,
+    ISMINE_WATCH_ONLY = 1,
+    ISMINE_SPENDABLE = 2,
     ISMINE_ALL = ISMINE_WATCH_ONLY | ISMINE_SPENDABLE
 };
 
@@ -34,15 +28,12 @@ typedef uint8_t isminefilter;
  * isInvalid becomes true when the script is found invalid by consensus or
  * policy. This will terminate the recursion and return ISMINE_NO immediately,
  * as an invalid script should never be considered as "mine". Currently the only
- * use of isInvalid is indicate uncompressed keys when
- * SCRIPT_VERIFY_COMPRESSED_PUBKEYTYPE is specified, but could also be used in
- * similar cases in the future.
+ * use of isInvalid is for P2SH-inside-P2SH scripts (as a technicality, to
+ * prevent infinite recursion).
  */
 isminetype IsMine(const CKeyStore &keystore, const CScript &scriptPubKey,
                   bool &isInvalid);
 isminetype IsMine(const CKeyStore &keystore, const CScript &scriptPubKey);
-isminetype IsMine(const CKeyStore &keystore, const CTxDestination &dest,
-                  bool &isInvalid);
 isminetype IsMine(const CKeyStore &keystore, const CTxDestination &dest);
 
 #endif // BITCOIN_SCRIPT_ISMINE_H

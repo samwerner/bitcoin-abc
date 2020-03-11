@@ -74,7 +74,7 @@ Here are some handy links for development practices aligned with Bitcoin ABC:
 - [The importance of fixing bugs immediately](https://youtu.be/E2MIpi8pIvY?t=16m0s)
 - [Slow Deployment Causes Meetings](https://www.facebook.com/notes/kent-beck/slow-deployment-causes-meetings/1055427371156793/)
 - [Good Work, Great Work, and Right Work](https://forum.dlang.org/post/q7u6g1$94p$1@digitalmars.com)
-
+- [Accelerate: The Science of Lean Software and DevOps](https://www.amazon.com/Accelerate-Software-Performing-Technology-Organizations/dp/1942788339)
 
 Getting set up with the Bitcoin ABC Repository
 ----------------------------------------------
@@ -127,14 +127,25 @@ Follow instructions provided by `arc install-certificate` to provide your API to
 During submission of patches, arcanist will automatically run `arc lint` to
 enforce Bitcoin ABC code formatting standards, and often suggests changes.
 If code formatting tools do not install automatically on your system, you
-will have to install clang-format-7, autopep8, flake8, phpcs and shellcheck.
+will have to install clang-format-8, clang-tidy (version >=8), autopep8, flake8,
+phpcs and shellcheck.
 
-To install clang-format-7 on Ubuntu (>= 18.04+updates) or Debian (>= 10):
+To install clang-format-8 and clang-tidy on Ubuntu (>= 18.04+updates) or Debian (>= 10):
 ```
-sudo apt-get install clang-format-7
+sudo apt-get install clang-format-8 clang-tidy-8 clang-tools-8
 ```
-If not available in the distribution, clang-format-7 can be installed from
-https://releases.llvm.org/download.html or https://apt.llvm.org
+
+
+If not available in the distribution, `clang-format-8` and `clang-tidy` can be
+installed from https://releases.llvm.org/download.html or https://apt.llvm.org.
+
+For example, for macOS:
+```
+curl http://releases.llvm.org/8.0.0/clang+llvm-8.0.0-x86_64-apple-darwin.tar.xz | tar -xJv
+ln -s $PWD/clang+llvm-8.0.0-x86_64-apple-darwin/bin/clang-format /usr/local/bin/clang-format
+ln -s $PWD/clang+llvm-8.0.0-x86_64-apple-darwin/bin/clang-tidy /usr/local/bin/clang-tidy
+```
+
 
 To install autopep8, flake8 and phpcs on Ubuntu:
 ```
@@ -190,7 +201,7 @@ committed a change to the Bitcoin ABC repository.
 
 - You will likely be re-writing git histories multiple times, which causes
 timestamp changes that require re-building a significant number of files. It's
-highly recommended to install `ccache` (re-run ./configure if you install it
+highly recommended to install `ccache` (re-run cmake if you install it
 later), as this will help cut your re-build times from several minutes to under
 a minute, in many cases.
 
@@ -213,4 +224,4 @@ author must contain its license header with the original author(s) and source.
 Disclosure Policy
 -----------------
 
-See [DISCLOSURE_POLICY](DISCLOSURE_POLICY).
+See [DISCLOSURE_POLICY](DISCLOSURE_POLICY.md).

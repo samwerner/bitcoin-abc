@@ -9,6 +9,8 @@
 
 #include <boost/test/unit_test.hpp>
 
+#include <memory>
+
 BOOST_FIXTURE_TEST_SUITE(allocator_tests, BasicTestingSetup)
 
 BOOST_AUTO_TEST_CASE(arena_tests) {
@@ -75,54 +77,64 @@ BOOST_AUTO_TEST_CASE(arena_tests) {
     b.walk();
 #endif
     // Sweeping allocate all memory
-    for (int x = 0; x < 1024; ++x)
+    for (int x = 0; x < 1024; ++x) {
         addr.push_back(b.alloc(1024));
+    }
     BOOST_CHECK(b.stats().free == 0);
     // memory is full, this must return nullptr
     BOOST_CHECK(b.alloc(1024) == nullptr);
     BOOST_CHECK(b.alloc(0) == nullptr);
-    for (int x = 0; x < 1024; ++x)
+    for (int x = 0; x < 1024; ++x) {
         b.free(addr[x]);
+    }
     addr.clear();
     BOOST_CHECK(b.stats().total == synth_size);
     BOOST_CHECK(b.stats().free == synth_size);
 
     // Now in the other direction...
-    for (int x = 0; x < 1024; ++x)
+    for (int x = 0; x < 1024; ++x) {
         addr.push_back(b.alloc(1024));
-    for (int x = 0; x < 1024; ++x)
+    }
+    for (int x = 0; x < 1024; ++x) {
         b.free(addr[1023 - x]);
+    }
     addr.clear();
 
     // Now allocate in smaller unequal chunks, then deallocate haphazardly
     // Not all the chunks will succeed allocating, but freeing nullptr is
     // allowed so that is no problem.
-    for (int x = 0; x < 2048; ++x)
+    for (int x = 0; x < 2048; ++x) {
         addr.push_back(b.alloc(x + 1));
-    for (int x = 0; x < 2048; ++x)
+    }
+    for (int x = 0; x < 2048; ++x) {
         b.free(addr[((x * 23) % 2048) ^ 242]);
+    }
     addr.clear();
 
     // Go entirely wild: free and alloc interleaved, generate targets and sizes
     // using pseudo-randomness.
-    for (int x = 0; x < 2048; ++x)
-        addr.push_back(0);
+    for (int x = 0; x < 2048; ++x) {
+        addr.push_back(nullptr);
+    }
     uint32_t s = 0x12345678;
     for (int x = 0; x < 5000; ++x) {
         int idx = s & (addr.size() - 1);
         if (s & 0x80000000) {
             b.free(addr[idx]);
-            addr[idx] = 0;
+            addr[idx] = nullptr;
         } else if (!addr[idx]) {
             addr[idx] = b.alloc((s >> 16) & 2047);
         }
         bool lsb = s & 1;
         s >>= 1;
         // LFSR period 0xf7ffffe0
-        if (lsb) s ^= 0xf00f00f0;
+        if (lsb) {
+            s ^= 0xf00f00f0;
+        }
     }
-    for (void *ptr : addr)
+    for (void *ptr : addr) {
         b.free(ptr);
+    }
     addr.clear();
 
     BOOST_CHECK(b.stats().total == synth_size);
@@ -147,7 +159,7 @@ public:
             // Fake address, do not actually use this memory
             return reinterpret_cast<void *>(0x08000000 + (count << 24));
         }
-        return 0;
+        return nullptr;
     }
     void FreeLocked(void *addr, size_t len) override {}
     size_t GetLimit() override { return std::numeric_limits<size_t>::max(); }
@@ -159,7 +171,7 @@ private:
 
 BOOST_AUTO_TEST_CASE(lockedpool_tests_mock) {
     // Test over three virtual arenas, of which one will succeed being locked
-    std::unique_ptr<LockedPageAllocator> x(new TestLockedPageAllocator(3, 1));
+    auto x = std::make_unique<TestLockedPageAllocator>(3, 1);
     LockedPool pool(std::move(x));
     BOOST_CHECK(pool.stats().total == 0);
     BOOST_CHECK(pool.stats().locked == 0);

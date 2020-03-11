@@ -37,7 +37,7 @@ PATTERN_ONION = re.compile(
 # Used to only select nodes with a user agent string compatible with the
 # BCH/UAHF specification.
 PATTERN_AGENT = re.compile(
-    r"^(/Bitcoin ABC:0.(20).(\d+)\(.+\)/|/bcash:v1.(\d+).(\d+)-(\S+)/)")
+    r"^(/Bitcoin ABC:0.(20).(\d+)\(.+\)/|/bchd:0.15.(\d+)\(.+\)/|/BUCash:1.7.(\d+)\(.+\)/)")
 
 
 def parseline(line):
@@ -45,7 +45,8 @@ def parseline(line):
     if len(sline) < 11:
         return None
 
-    # The user agent is at the end of the line. It may contain space, so we concatenate.
+    # The user agent is at the end of the line. It may contain space, so we
+    # concatenate.
     for i in range(12, len(sline)):
         sline[11] += ' ' + sline[i]
 
@@ -71,7 +72,8 @@ def parseline(line):
             if m.group(1) in ['::']:
                 return None
             ipstr = m.group(1)
-            # XXX parse IPv6 into number, could use name_to_ipv6 from generate-seeds
+            # XXX parse IPv6 into number, could use name_to_ipv6 from
+            # generate-seeds
             sortkey = ipstr
             port = int(m.group(2))
     else:
@@ -130,33 +132,47 @@ def filtermultiport(ips):
 
 def filterbyasn(ips, max_per_asn, max_total):
     # Sift out ips by type
-    ips_ipv4 = [ip for ip in ips if ip['net'] == 'ipv4']
-    ips_ipv6 = [ip for ip in ips if ip['net'] == 'ipv6']
+    ips_ipv46 = [ip for ip in ips if ip['net'] in ['ipv4', 'ipv6']]
     ips_onion = [ip for ip in ips if ip['net'] == 'onion']
 
-    # Filter IPv4 by ASN
+    # Filter IPv46 by ASN
     result = []
     asn_count = {}
-    for ip in ips_ipv4:
+    for ip in ips_ipv46:
         if len(result) == max_total:
             break
         try:
-            asn = int([x.to_text()
-                       for x in dns.resolver.query('.'.join(reversed(ip['ip'].split('.'))) + '.origin.asn.cymru.com', 'TXT').response.answer][0].split('\"')[1].split(' ')[0])
+            if ip['net'] == 'ipv4':
+                ipaddr = ip['ip']
+                prefix = '.origin'
+            else:
+                # http://www.team-cymru.com/IP-ASN-mapping.html
+                # 2001:4860:b002:23::68
+                res = str()
+                # pick the first 4 nibbles
+                for nb in ip['ip'].split(':')[:4]:
+                    # right padded with '0'
+                    for c in nb.zfill(4):
+                        # 2001 4860 b002 0023
+                        res += c + '.'
+                # 2.0.0.1.4.8.6.0.b.0.0.2.0.0.2.3
+                ipaddr = res.rstrip('.')
+                prefix = '.origin6'
+
+            asn = int([x.to_text() for x in dns.resolver.query('.'.join(
+                       reversed(ipaddr.split('.'))) + prefix + '.asn.cymru.com',
+                'TXT').response.answer][0].split('\"')[1].split(' ')[0])
             if asn not in asn_count:
                 asn_count[asn] = 0
             if asn_count[asn] == max_per_asn:
                 continue
             asn_count[asn] += 1
             result.append(ip)
-        except:
+        except Exception:
             sys.stderr.write(
                 'ERR: Could not resolve ASN for "' + ip['ip'] + '"\n')
 
-    # TODO: filter IPv6 by ASN
-
-    # Add back non-IPv4
-    result.extend(ips_ipv6)
+    # Add back Onions
     result.extend(ips_onion)
     return result
 

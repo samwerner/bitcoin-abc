@@ -13,7 +13,7 @@ Derived from a variety of functional tests.
 from test_framework.blocktools import (
     create_block,
     create_coinbase,
-    create_transaction,
+    create_tx_with_script,
     make_conform_to_ctor,
 )
 from test_framework.key import CECKey
@@ -43,10 +43,12 @@ from test_framework.script import (
 from test_framework.test_framework import BitcoinTestFramework
 from test_framework.util import assert_raises_rpc_error
 
-# A mandatory (bannable) error occurs when people pass Schnorr signatures into OP_CHECKMULTISIG.
+# A mandatory (bannable) error occurs when people pass Schnorr signatures
+# into OP_CHECKMULTISIG.
 SCHNORR_MULTISIG_ERROR = 'mandatory-script-verify-flag-failed (Signature cannot be 65 bytes in CHECKMULTISIG)'
 
-# A mandatory (bannable) error occurs when people send invalid Schnorr sigs into OP_CHECKSIG.
+# A mandatory (bannable) error occurs when people send invalid Schnorr
+# sigs into OP_CHECKSIG.
 NULLFAIL_ERROR = 'mandatory-script-verify-flag-failed (Signature must be zero for failed CHECK(MULTI)SIG operation)'
 
 # Blocks with invalid scripts give this error:
@@ -56,7 +58,7 @@ BADINPUTS_ERROR = 'blk-bad-inputs'
 # This 64-byte signature is used to test exclusion & banning according to
 # the above error messages.
 # Tests of real 64 byte ECDSA signatures can be found in script_tests.
-sig64 = b'\0'*64
+sig64 = b'\0' * 64
 
 
 class SchnorrTest(BitcoinTestFramework):
@@ -138,7 +140,7 @@ class SchnorrTest(BitcoinTestFramework):
         spendable_outputs = [block.vtx[0] for block in blocks]
 
         self.log.info("Mature the blocks and get out of IBD.")
-        node.generate(100)
+        node.generatetoaddress(100, node.get_deterministic_priv_key().address)
 
         tip = self.getbestblock(node)
 
@@ -163,14 +165,14 @@ class SchnorrTest(BitcoinTestFramework):
             value = spendfrom.vout[0].nValue
 
             # Fund transaction
-            txfund = create_transaction(spendfrom, 0, b'', value, script)
+            txfund = create_tx_with_script(spendfrom, 0, b'', value, script)
             txfund.rehash()
             fundings.append(txfund)
 
             # Spend transaction
             txspend = CTransaction()
             txspend.vout.append(
-                CTxOut(value-1000, CScript([OP_TRUE])))
+                CTxOut(value - 1000, CScript([OP_TRUE])))
             txspend.vin.append(
                 CTxIn(COutPoint(txfund.sha256, 0), b''))
 
@@ -205,7 +207,7 @@ class SchnorrTest(BitcoinTestFramework):
         self.log.info("Typical ECDSA and Schnorr CHECKSIG are valid.")
         node.p2p.send_txs_and_test([schnorrchecksigtx, ecdsachecksigtx], node)
         # They get mined as usual.
-        node.generate(1)
+        node.generatetoaddress(1, node.get_deterministic_priv_key().address)
         tip = self.getbestblock(node)
         # Make sure they are in the block, and mempool is now empty.
         txhashes = set([schnorrchecksigtx.hash, ecdsachecksigtx.hash])

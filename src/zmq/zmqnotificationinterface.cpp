@@ -1,4 +1,4 @@
-// Copyright (c) 2015-2016 The Bitcoin Core developers
+// Copyright (c) 2015-2018 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -24,6 +24,15 @@ CZMQNotificationInterface::~CZMQNotificationInterface() {
          i != notifiers.end(); ++i) {
         delete *i;
     }
+}
+
+std::list<const CZMQAbstractNotifier *>
+CZMQNotificationInterface::GetActiveNotifiers() const {
+    std::list<const CZMQAbstractNotifier *> result;
+    for (const auto *n : notifiers) {
+        result.push_back(n);
+    }
+    return result;
 }
 
 CZMQNotificationInterface *CZMQNotificationInterface::Create() {
@@ -118,7 +127,9 @@ void CZMQNotificationInterface::UpdatedBlockTip(const CBlockIndex *pindexNew,
                                                 const CBlockIndex *pindexFork,
                                                 bool fInitialDownload) {
     // In IBD or blocks were disconnected without any new ones
-    if (fInitialDownload || pindexNew == pindexFork) return;
+    if (fInitialDownload || pindexNew == pindexFork) {
+        return;
+    }
 
     for (std::list<CZMQAbstractNotifier *>::iterator i = notifiers.begin();
          i != notifiers.end();) {
@@ -168,3 +179,5 @@ void CZMQNotificationInterface::BlockDisconnected(
         TransactionAddedToMempool(ptx);
     }
 }
+
+CZMQNotificationInterface *g_zmq_notification_interface = nullptr;

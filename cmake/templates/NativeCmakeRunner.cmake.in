@@ -1,0 +1,8 @@
+#!/bin/sh
+
+"${CMAKE_COMMAND}" -G"${CMAKE_GENERATOR}" \
+    -S "${CMAKE_SOURCE_DIR}" \
+    -B "${NATIVE_BUILD_DIR}" \
+    -D__IS_NATIVE_BUILD=1 \
+    -DCMAKE_MAKE_PROGRAM=${CMAKE_MAKE_PROGRAM} \
+    ${ARGS}

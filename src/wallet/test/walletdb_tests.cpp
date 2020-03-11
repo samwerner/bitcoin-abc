@@ -1,10 +1,11 @@
-// Copyright (c) 2017 The Bitcoin developers
+// Copyright (c) 2017-2019 The Bitcoin developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <wallet/walletdb.h>
 
 #include <chainparams.h>
+#include <interfaces/chain.h>
 #include <wallet/wallet.h>
 
 #include <test/test_bitcoin.h>
@@ -12,10 +13,13 @@
 
 #include <boost/test/unit_test.hpp>
 
+#include <memory>
+
 namespace {
 static std::unique_ptr<CWallet> LoadWallet(WalletBatch &batch) {
-    std::unique_ptr<CWallet> wallet(
-        new CWallet(Params(), "dummy", WalletDatabase::CreateDummy()));
+    auto chain = interfaces::MakeChain();
+    std::unique_ptr<CWallet> wallet = std::make_unique<CWallet>(
+        Params(), *chain, WalletLocation(), WalletDatabase::CreateDummy());
     DBErrors res = batch.LoadWallet(wallet.get());
     BOOST_CHECK(res == DBErrors::LOAD_OK);
     return wallet;

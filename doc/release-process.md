@@ -17,11 +17,10 @@ Bitcoin ABC Release Process
       Manually test bitcoin-qt by sending some transactions and navigating through the menus.
  
 3. Update the documents / code which needs to be updated every release
-    - Check that doc/release-notes.md is complete, and fill in any missing items.
+    - Check that [release-notes.md](doc/release-notes.md) is complete, and fill in any missing items.
     - Update [bips.md](/doc/bips.md) to account for changes since the last release.
     - (major releases) Update [`BLOCK_CHAIN_SIZE`](/src/qt/intro.cpp) to the current size plus
       some overhead.
-    - Update `src/chainparamsconstants.h` per [contrib/devtools/chainparams/README.md](contrib/devtools/chainparams/README.md)
     - Regenerate manpages (run `contrib/devtools/gen-manpages.sh`, or for out-of-tree builds run
       `BUILDDIR=$PWD/build contrib/devtools/gen-manpages.sh`).
     - Update seeds as per [contrib/seeds/README.md](/contrib/seeds/README.md).
@@ -35,11 +34,10 @@ Bitcoin ABC Release Process
         ```
 
 5. Increment version number for the next release in:
-    - doc/release-notes.md (and copy existing one to versioned doc/release-notes/*.md)
-    - configure.ac
-    - CMakeLists.txt
-    - contrib/gitian-descriptors/*.yml (before a new major release)
-    - contrib/seeds/makeseeds.py (only after a new major release)
+    - `doc/release-notes.md` (and copy existing one to versioned `doc/release-notes/*.md`)
+    - `configure.ac`
+    - `CMakeLists.txt`
+    - `contrib/seeds/makeseeds.py` (only after a new major release)
 
 ## Release
 

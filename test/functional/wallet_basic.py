@@ -26,6 +26,9 @@ class WalletTest(BitcoinTestFramework):
         self.num_nodes = 4
         self.setup_clean_chain = True
 
+    def skip_test_if_missing_module(self):
+        self.skip_if_no_wallet()
+
     def setup_network(self):
         self.add_nodes(4)
         self.start_node(0)
@@ -36,7 +39,8 @@ class WalletTest(BitcoinTestFramework):
         connect_nodes_bi(self.nodes[0], self.nodes[2])
         self.sync_all([self.nodes[0:3]])
 
-    def check_fee_amount(self, curr_balance, balance_with_fee, fee_per_byte, tx_size):
+    def check_fee_amount(self, curr_balance,
+                         balance_with_fee, fee_per_byte, tx_size):
         """Return curr_balance after asserting the fee was in range"""
         fee = balance_with_fee - curr_balance
         assert_fee_amount(fee, tx_size, fee_per_byte * 1000)
@@ -64,6 +68,16 @@ class WalletTest(BitcoinTestFramework):
         assert_equal(self.nodes[1].getbalance(), 50)
         assert_equal(self.nodes[2].getbalance(), 0)
 
+        # Check getbalance with different arguments
+        assert_equal(self.nodes[0].getbalance("*"), 50)
+        assert_equal(self.nodes[0].getbalance("*", 1), 50)
+        assert_equal(self.nodes[0].getbalance("*", 1, True), 50)
+        assert_equal(self.nodes[0].getbalance(minconf=1), 50)
+
+        # first argument of getbalance must be excluded or set to "*"
+        assert_raises_rpc_error(-32, "dummy first argument must be excluded or set to \"*\"",
+                                self.nodes[0].getbalance, "")
+
         # Check that only first and second nodes have UTXOs
         utxos = self.nodes[0].listunspent()
         assert_equal(len(utxos), 1)
@@ -89,8 +103,8 @@ class WalletTest(BitcoinTestFramework):
         mempool_txid = self.nodes[0].sendtoaddress(
             self.nodes[2].getnewaddress(), 10)
         memory_after = self.nodes[0].getmemoryinfo()
-        assert(memory_before['locked']['used'] +
-               64 <= memory_after['locked']['used'])
+        assert memory_before['locked']['used'] + \
+            64 <= memory_after['locked']['used']
 
         self.log.info("test gettxout (second part)")
         # utxo spent in mempool should be visible if you exclude mempool
@@ -130,8 +144,15 @@ class WalletTest(BitcoinTestFramework):
         assert_equal([unspent_0], self.nodes[2].listlockunspent())
         self.nodes[2].lockunspent(True, [unspent_0])
         assert_equal(len(self.nodes[2].listlockunspent()), 0)
-        assert_raises_rpc_error(-8, "Invalid parameter, unknown transaction", self.nodes[2].lockunspent, False, [
-                                {"txid": "0000000000000000000000000000000000", "vout": 0}])
+        assert_raises_rpc_error(-8, "txid must be of length 64 (not 34, for '0000000000000000000000000000000000')",
+                                self.nodes[2].lockunspent, False,
+                                [{"txid": "0000000000000000000000000000000000", "vout": 0}])
+        assert_raises_rpc_error(-8, "txid must be hexadecimal string (not 'ZZZ0000000000000000000000000000000000000000000000000000000000000')",
+                                self.nodes[2].lockunspent, False,
+                                [{"txid": "ZZZ0000000000000000000000000000000000000000000000000000000000000", "vout": 0}])
+        assert_raises_rpc_error(-8, "Invalid parameter, unknown transaction",
+                                self.nodes[2].lockunspent, False,
+                                [{"txid": "0000000000000000000000000000000000000000000000000000000000000000", "vout": 0}])
         assert_raises_rpc_error(-8, "Invalid parameter, vout index out of bounds",
                                 self.nodes[2].lockunspent, False, [{"txid": unspent_0["txid"], "vout": 999}])
 
@@ -156,7 +177,7 @@ class WalletTest(BitcoinTestFramework):
             inputs = []
             outputs = {}
             inputs.append({"txid": utxo["txid"], "vout": utxo["vout"]})
-            outputs[self.nodes[2].getnewaddress("from1")] = utxo["amount"] - 3
+            outputs[self.nodes[2].getnewaddress()] = utxo["amount"] - 3
             raw_tx = self.nodes[0].createrawtransaction(inputs, outputs)
             txns_to_send.append(
                 self.nodes[0].signrawtransactionwithwallet(raw_tx))
@@ -171,7 +192,6 @@ class WalletTest(BitcoinTestFramework):
 
         assert_equal(self.nodes[0].getbalance(), 0)
         assert_equal(self.nodes[2].getbalance(), 94)
-        assert_equal(self.nodes[2].getbalance("from1"), 94 - 21)
 
         # Verify that a spent output cannot be locked anymore
         spent_0 = {"txid": node0utxos[0]["txid"],
@@ -202,7 +222,7 @@ class WalletTest(BitcoinTestFramework):
             '20'), fee_per_byte, count_bytes(self.nodes[2].getrawtransaction(txid)))
 
         # Sendmany 10 BCH
-        txid = self.nodes[2].sendmany('from1', {address: 10}, 0, "", [])
+        txid = self.nodes[2].sendmany('', {address: 10}, 0, "", [])
         self.nodes[2].generate(1)
         self.sync_all([self.nodes[0:3]])
         node_0_bal += Decimal('10')
@@ -212,7 +232,7 @@ class WalletTest(BitcoinTestFramework):
         assert_equal(self.nodes[0].getbalance(), node_0_bal)
 
         # Sendmany 10 BCH with subtract fee from amount
-        txid = self.nodes[2].sendmany('from1', {address: 10}, 0, "", [address])
+        txid = self.nodes[2].sendmany('', {address: 10}, 0, "", [address])
         self.nodes[2].generate(1)
         self.sync_all([self.nodes[0:3]])
         node_2_bal -= Decimal('10')
@@ -237,7 +257,7 @@ class WalletTest(BitcoinTestFramework):
         assert_equal(set(relayed), {txid1, txid2})
         sync_mempools(self.nodes)
 
-        assert(txid1 in self.nodes[3].getrawmempool())
+        assert txid1 in self.nodes[3].getrawmempool()
 
         # Exercise balance rpcs
         assert_equal(self.nodes[0].getwalletinfo()["unconfirmed_balance"], 1)
@@ -272,7 +292,7 @@ class WalletTest(BitcoinTestFramework):
             if uTx['txid'] == zeroValueTxid:
                 found = True
                 assert_equal(uTx['amount'], Decimal('0'))
-        assert(found)
+        assert found
 
         # do some -walletbroadcast tests
         self.stop_nodes()
@@ -292,7 +312,8 @@ class WalletTest(BitcoinTestFramework):
         # should not be changed because tx was not broadcasted
         assert_equal(self.nodes[2].getbalance(), node_2_bal)
 
-        # now broadcast from another node, mine a block, sync, and check the balance
+        # now broadcast from another node, mine a block, sync, and check the
+        # balance
         self.nodes[1].sendrawtransaction(txObjNotBroadcasted['hex'])
         self.nodes[1].generate(1)
         self.sync_all([self.nodes[0:3]])
@@ -318,7 +339,8 @@ class WalletTest(BitcoinTestFramework):
         sync_blocks(self.nodes[0:3])
         node_2_bal += 2
 
-        # tx should be added to balance because after restarting the nodes tx should be broadcasted
+        # tx should be added to balance because after restarting the nodes tx
+        # should be broadcasted
         assert_equal(self.nodes[2].getbalance(), node_2_bal)
 
         # send a tx with value in a string (PR#6380 +)
@@ -356,7 +378,7 @@ class WalletTest(BitcoinTestFramework):
         self.nodes[1].importaddress(address_to_import)
 
         # 3. Validate that the imported address is watch-only on node1
-        assert(self.nodes[1].getaddressinfo(address_to_import)["iswatchonly"])
+        assert self.nodes[1].getaddressinfo(address_to_import)["iswatchonly"]
 
         # 4. Check that the unspents after import are not spendable
         assert_array_result(self.nodes[1].listunspent(),
@@ -392,14 +414,17 @@ class WalletTest(BitcoinTestFramework):
         #   - True: unicode escaped as \u....
         #   - False: unicode directly as UTF-8
         for mode in [True, False]:
-            self.nodes[0].ensure_ascii = mode
-            # unicode check: Basic Multilingual Plane, Supplementary Plane respectively
-            for s in [u'рыба', u'𝅘𝅥𝅯']:
-                addr = self.nodes[0].getaccountaddress(s)
-                label = self.nodes[0].getaccount(addr)
-                assert_equal(label, s)
-                assert(s in self.nodes[0].listaccounts().keys())
-        self.nodes[0].ensure_ascii = True  # restore to default
+            self.nodes[0].rpc.ensure_ascii = mode
+            # unicode check: Basic Multilingual Plane, Supplementary Plane
+            # respectively
+            for label in [u'рыба', u'𝅘𝅥𝅯']:
+                addr = self.nodes[0].getnewaddress()
+                self.nodes[0].setlabel(addr, label)
+                assert_equal(self.nodes[0].getaddressinfo(
+                    addr)['label'], label)
+                assert(label in self.nodes[0].listlabels())
+        # restore to default
+        self.nodes[0].rpc.ensure_ascii = True
 
         # maintenance tests
         maintenance = [
@@ -433,7 +458,7 @@ class WalletTest(BitcoinTestFramework):
         assert_equal(len(self.nodes[0].listsinceblock(
             blocks[1])["transactions"]), 0)
 
-        # ==Check that wallet prefers to use coins that don't exceed mempool limits =====
+        # ==Check that wallet prefers to use coins that don't exceed mempool li
 
         # Get all non-zero utxos together
         chain_addrs = [self.nodes[0].getnewaddress(
@@ -452,7 +477,8 @@ class WalletTest(BitcoinTestFramework):
         # Make a long chain of unconfirmed payments without hitting mempool limit
         # Each tx we make leaves only one output of change on a chain 1 longer
         # Since the amount to send is always much less than the outputs, we only ever need one output
-        # So we should be able to generate exactly chainlimit txs for each original output
+        # So we should be able to generate exactly chainlimit txs for each
+        # original output
         sending_addr = self.nodes[1].getnewaddress()
         txid_list = []
         for i in range(chainlimit * 2):
@@ -465,27 +491,30 @@ class WalletTest(BitcoinTestFramework):
         # The tx will be stored in the wallet but not accepted to the mempool
         extra_txid = self.nodes[0].sendtoaddress(
             sending_addr, Decimal('0.0001'))
-        assert(extra_txid not in self.nodes[0].getrawmempool())
-        assert(extra_txid in [tx["txid"]
-                              for tx in self.nodes[0].listtransactions()])
+        assert extra_txid not in self.nodes[0].getrawmempool()
+        assert extra_txid in [tx["txid"]
+                              for tx in self.nodes[0].listtransactions()]
         self.nodes[0].abandontransaction(extra_txid)
         total_txs = len(self.nodes[0].listtransactions("*", 99999))
 
         # Try with walletrejectlongchains
-        # Double chain limit but require combining inputs, so we pass SelectCoinsMinConf
+        # Double chain limit but require combining inputs, so we pass
+        # SelectCoinsMinConf
         self.stop_node(0)
         self.start_node(0, extra_args=[
                         "-walletrejectlongchains", "-limitancestorcount=" + str(2 * chainlimit)])
 
         # wait for loadmempool
         timeout = 10
-        while (timeout > 0 and len(self.nodes[0].getrawmempool()) < chainlimit * 2):
+        while (timeout > 0 and len(
+                self.nodes[0].getrawmempool()) < chainlimit * 2):
             time.sleep(0.5)
             timeout -= 0.5
         assert_equal(len(self.nodes[0].getrawmempool()), chainlimit * 2)
 
         node0_balance = self.nodes[0].getbalance()
-        # With walletrejectlongchains we will not create the tx and store it in our wallet.
+        # With walletrejectlongchains we will not create the tx and store it in
+        # our wallet.
         assert_raises_rpc_error(-4, "Transaction has too long of a mempool chain",
                                 self.nodes[0].sendtoaddress, sending_addr, node0_balance - Decimal('0.01'))
 
@@ -493,7 +522,8 @@ class WalletTest(BitcoinTestFramework):
         assert_equal(total_txs, len(
             self.nodes[0].listtransactions("*", 99999)))
 
-        # Test getaddressinfo. Note that these addresses are taken from disablewallet.py
+        # Test getaddressinfo on external address. Note that these addresses
+        # are taken from disablewallet.py
         assert_raises_rpc_error(-5, "Invalid address",
                                 self.nodes[0].getaddressinfo, "3J98t1WpEZ73CNmQviecrnyiWrnqRhWNLy")
         address_info = self.nodes[0].getaddressinfo(
@@ -505,6 +535,24 @@ class WalletTest(BitcoinTestFramework):
         assert not address_info["ismine"]
         assert not address_info["iswatchonly"]
         assert not address_info["isscript"]
+        assert not address_info["ischange"]
+
+        # Test getaddressinfo 'ischange' field on change address.
+        self.nodes[0].generate(1)
+        destination = self.nodes[1].getnewaddress()
+        txid = self.nodes[0].sendtoaddress(destination, 0.123)
+        tx = self.nodes[0].decoderawtransaction(
+            self.nodes[0].getrawtransaction(txid))
+        output_addresses = [vout['scriptPubKey']['addresses'][0]
+                            for vout in tx["vout"]]
+        assert len(output_addresses) > 1
+        for address in output_addresses:
+            ischange = self.nodes[0].getaddressinfo(address)['ischange']
+            assert_equal(ischange, address != destination)
+            if ischange:
+                change = address
+        self.nodes[0].setlabel(change, 'foobar')
+        assert_equal(self.nodes[0].getaddressinfo(change)['ischange'], False)
 
 
 if __name__ == '__main__':

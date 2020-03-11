@@ -15,6 +15,9 @@ from test_framework.cdefs import (
 from test_framework.test_framework import BitcoinTestFramework
 from test_framework.util import assert_equal, assert_raises_rpc_error
 
+BLOCKSIZE_TOO_LOW = "Invalid parameter, excessiveblock must be larger than {}".format(
+    LEGACY_MAX_BLOCK_SIZE)
+
 
 class ABC_RPC_Test (BitcoinTestFramework):
 
@@ -22,15 +25,14 @@ class ABC_RPC_Test (BitcoinTestFramework):
         self.num_nodes = 1
         self.tip = None
         self.setup_clean_chain = True
-        self.extra_args = [['-norelaypriority',
-                            '-whitelist=127.0.0.1']]
+        self.extra_args = [['-whitelist=127.0.0.1']]
 
     def check_subversion(self, pattern_str):
         # Check that the subversion is set as expected
         netinfo = self.nodes[0].getnetworkinfo()
         subversion = netinfo['subversion']
         pattern = re.compile(pattern_str)
-        assert(pattern.match(subversion))
+        assert pattern.match(subversion)
 
     def test_excessiveblock(self):
         # Check that we start with DEFAULT_MAX_BLOCK_SIZE
@@ -45,10 +47,15 @@ class ABC_RPC_Test (BitcoinTestFramework):
         assert_equal(ebs, LEGACY_MAX_BLOCK_SIZE + 1)
 
         # Check that going below legacy size is not accepted
-        assert_raises_rpc_error(-8,
-                                "Invalid parameter, excessiveblock must be larger than {}".format(
-                                    LEGACY_MAX_BLOCK_SIZE),
+        assert_raises_rpc_error(-8, BLOCKSIZE_TOO_LOW,
                                 self.nodes[0].setexcessiveblock, LEGACY_MAX_BLOCK_SIZE)
+        getsize = self.nodes[0].getexcessiveblock()
+        ebs = getsize['excessiveBlockSize']
+        assert_equal(ebs, LEGACY_MAX_BLOCK_SIZE + 1)
+
+        # Check that a negative size returns an error
+        assert_raises_rpc_error(-8, BLOCKSIZE_TOO_LOW,
+                                self.nodes[0].setexcessiveblock, -2 * LEGACY_MAX_BLOCK_SIZE)
         getsize = self.nodes[0].getexcessiveblock()
         ebs = getsize['excessiveBlockSize']
         assert_equal(ebs, LEGACY_MAX_BLOCK_SIZE + 1)

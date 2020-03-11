@@ -1,5 +1,5 @@
 // Copyright (c) 2011-2016 The Bitcoin Core developers
-// Copyright (c) 2017-2018 The Bitcoin developers
+// Copyright (c) 2017-2020 The Bitcoin developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -334,7 +334,8 @@ BOOST_AUTO_TEST_CASE(test_Get) {
     t1.vout[0].nValue = 90 * CENT;
     t1.vout[0].scriptPubKey << OP_1;
 
-    BOOST_CHECK(AreInputsStandard(CTransaction(t1), coins));
+    BOOST_CHECK(AreInputsStandard(CTransaction(t1), coins,
+                                  STANDARD_SCRIPT_VERIFY_FLAGS));
     BOOST_CHECK_EQUAL(coins.GetValueIn(CTransaction(t1)),
                       (50 + 21 + 22) * CENT);
 }
@@ -486,7 +487,7 @@ BOOST_AUTO_TEST_CASE(test_big_transaction) {
         std::vector<CScriptCheck> vChecks;
         CTxOut &out = coins[tx.vin[i].prevout.GetN()].GetTxOut();
         CScriptCheck check(out.scriptPubKey, out.nValue, tx, i,
-                           MANDATORY_SCRIPT_VERIFY_FLAGS, false, txdata);
+                           STANDARD_SCRIPT_VERIFY_FLAGS, false, txdata);
         vChecks.push_back(CScriptCheck());
         check.swap(vChecks.back());
         control.Add(vChecks);

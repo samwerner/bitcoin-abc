@@ -1,17 +1,15 @@
 #!/usr/bin/env python3
-# Copyright (c) 2015-2016 The Bitcoin Core developers
+# Copyright (c) 2015-2019 The Bitcoin Core developers
 # Distributed under the MIT software license, see the accompanying
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
 """Test the ZMQ notification interface."""
-import configparser
 import struct
 from io import BytesIO
 
-from test_framework.test_framework import BitcoinTestFramework, SkipTest
+from test_framework.test_framework import BitcoinTestFramework
 from test_framework.messages import CTransaction
 from test_framework.util import (
     assert_equal,
-    bytes_to_hex_str,
     hash256,
 )
 
@@ -39,19 +37,13 @@ class ZMQTest (BitcoinTestFramework):
     def set_test_params(self):
         self.num_nodes = 2
 
+    def skip_test_if_missing_module(self):
+        self.skip_if_no_py3_zmq()
+        self.skip_if_no_bitcoind_zmq()
+        self.skip_if_no_wallet()
+
     def setup_nodes(self):
-        # Try to import python3-zmq. Skip this test if the import fails.
-        try:
-            import zmq
-        except ImportError:
-            raise SkipTest("python3-zmq module not available.")
-
-        # Check that bitcoin has been built with ZMQ enabled.
-        config = configparser.ConfigParser()
-        config.read_file(open(self.options.configfile, encoding='utf-8'))
-
-        if not config["components"].getboolean("ENABLE_ZMQ"):
-            raise SkipTest("bitcoind has not been built with zmq enabled.")
+        import zmq
 
         # Initialize ZMQ context and socket.
         # All messages are received in the same socket which means that this
@@ -70,8 +62,11 @@ class ZMQTest (BitcoinTestFramework):
         self.rawblock = ZMQSubscriber(socket, b"rawblock")
         self.rawtx = ZMQSubscriber(socket, b"rawtx")
 
-        self.extra_args = [["-zmqpub{}={}".format(sub.topic.decode(), address) for sub in [
-            self.hashblock, self.hashtx, self.rawblock, self.rawtx]], []]
+        self.extra_args = [
+            ["-zmqpub{}={}".format(sub.topic.decode(), address) for sub in [
+                self.hashblock, self.hashtx, self.rawblock, self.rawtx]],
+            [],
+        ]
         self.add_nodes(self.num_nodes, self.extra_args)
         self.start_nodes()
 
@@ -99,18 +94,17 @@ class ZMQTest (BitcoinTestFramework):
             tx = CTransaction()
             tx.deserialize(BytesIO(hex))
             tx.calc_sha256()
-            assert_equal(tx.hash, bytes_to_hex_str(txid))
+            assert_equal(tx.hash, txid.hex())
 
             # Should receive the generated block hash.
-            hash = bytes_to_hex_str(self.hashblock.receive())
+            hash = self.hashblock.receive().hex()
             assert_equal(genhashes[x], hash)
             # The block should only have the coinbase txid.
-            assert_equal([bytes_to_hex_str(txid)],
-                         self.nodes[1].getblock(hash)["tx"])
+            assert_equal([txid.hex()], self.nodes[1].getblock(hash)["tx"])
 
             # Should receive the generated raw block.
             block = self.rawblock.receive()
-            assert_equal(genhashes[x], bytes_to_hex_str(hash256(block[:80])))
+            assert_equal(genhashes[x], hash256(block[:80]).hex())
 
         self.log.info("Wait for tx from second node")
         payment_txid = self.nodes[1].sendtoaddress(
@@ -119,11 +113,11 @@ class ZMQTest (BitcoinTestFramework):
 
         # Should receive the broadcasted txid.
         txid = self.hashtx.receive()
-        assert_equal(payment_txid, bytes_to_hex_str(txid))
+        assert_equal(payment_txid, txid.hex())
 
         # Should receive the broadcasted raw transaction.
         hex = self.rawtx.receive()
-        assert_equal(payment_txid, bytes_to_hex_str(hash256(hex)))
+        assert_equal(payment_txid, hash256(hex).hex())
 
 
 if __name__ == '__main__':

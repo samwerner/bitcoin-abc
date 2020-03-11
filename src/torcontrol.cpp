@@ -12,7 +12,6 @@
 #include <util/system.h>
 
 #include <boost/algorithm/string/classification.hpp>
-#include <boost/algorithm/string/predicate.hpp>
 #include <boost/algorithm/string/replace.hpp>
 #include <boost/algorithm/string/split.hpp>
 #include <boost/signals2/signal.hpp>
@@ -594,7 +593,7 @@ void TorController::auth_cb(TorControlConnection &_conn,
             CService resolved(LookupNumeric("127.0.0.1", 9050));
             proxyType addrOnion = proxyType(resolved, true);
             SetProxy(NET_ONION, addrOnion);
-            SetLimited(NET_ONION, false);
+            SetReachable(NET_ONION, true);
         }
 
         // Finally - now create the service

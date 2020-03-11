@@ -39,8 +39,8 @@ class MinimumChainWorkTest(BitcoinTestFramework):
         # peers, so ensure that we're mining on an outbound peer and testing
         # block relay to inbound peers.
         self.setup_nodes()
-        for i in range(self.num_nodes-1):
-            connect_nodes(self.nodes[i+1], self.nodes[i])
+        for i in range(self.num_nodes - 1):
+            connect_nodes(self.nodes[i + 1], self.nodes[i])
 
     def run_test(self):
         # Start building a chain on node0.  node2 shouldn't be able to sync until node1's
@@ -56,7 +56,8 @@ class MinimumChainWorkTest(BitcoinTestFramework):
             (self.node_min_work[1] - starting_chain_work) / REGTEST_WORK_PER_BLOCK)
         self.log.info("Generating {} blocks on node0".format(
                       num_blocks_to_generate))
-        hashes = self.nodes[0].generate(num_blocks_to_generate)
+        hashes = self.nodes[0].generatetoaddress(num_blocks_to_generate,
+                                                 self.nodes[0].get_deterministic_priv_key().address)
 
         self.log.info("Node0 current chain work: {}".format(
                       self.nodes[0].getblockheader(hashes[-1])['chainwork']))
@@ -80,7 +81,8 @@ class MinimumChainWorkTest(BitcoinTestFramework):
         assert_equal(self.nodes[2].getblockcount(), starting_blockcount)
 
         self.log.info("Generating one more block")
-        self.nodes[0].generate(1)
+        self.nodes[0].generatetoaddress(
+            1, self.nodes[0].get_deterministic_priv_key().address)
 
         self.log.info("Verifying nodes are all synced")
 

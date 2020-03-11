@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright (c) 2014-2016 The Bitcoin Core developers
+# Copyright (c) 2014-2019 The Bitcoin Core developers
 # Distributed under the MIT software license, see the accompanying
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
 """Test mempool limiting together/eviction with the wallet."""
@@ -24,6 +24,9 @@ class MempoolLimitTest(BitcoinTestFramework):
         self.num_nodes = 1
 
         self.extra_args = [["-maxmempool=5", "-spendzeroconfchange=0"]]
+
+    def skip_test_if_missing_module(self):
+        self.skip_if_no_wallet()
 
     def run_test(self):
         relayfee = self.nodes[0].getnetworkinfo()['relayfee']
@@ -57,9 +60,10 @@ class MempoolLimitTest(BitcoinTestFramework):
                 self.nodes[0], utxos[30 * i:30 * i + 30], 30, 10 * (i + 1))
 
         self.log.info('The tx should be evicted by now')
-        assert(txid not in self.nodes[0].getrawmempool())
+        assert txid not in self.nodes[0].getrawmempool()
         txdata = self.nodes[0].gettransaction(txid)
-        assert(txdata['confirmations'] == 0)  # confirmation should still be 0
+        # confirmation should still be 0
+        assert txdata['confirmations'] == 0
 
         self.log.info('Check that mempoolminfee is larger than minrelytxfee')
         assert_equal(self.nodes[0].getmempoolinfo()[
@@ -72,7 +76,8 @@ class MempoolLimitTest(BitcoinTestFramework):
         inputs = [{"txid": us0["txid"], "vout": us0["vout"]}]
         outputs = {self.nodes[0].getnewaddress(): 0.0001}
         tx = self.nodes[0].createrawtransaction(inputs, outputs)
-        # specifically fund this tx with a fee < mempoolminfee, >= than minrelaytxfee
+        # specifically fund this tx with a fee < mempoolminfee, >= than
+        # minrelaytxfee
         txF = self.nodes[0].fundrawtransaction(tx, {'feeRate': relayfee})
         txFS = self.nodes[0].signrawtransactionwithwallet(txF['hex'])
         assert_raises_rpc_error(-26, "mempool min fee not met",

@@ -1,5 +1,5 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
-// Copyright (c) 2009-2016 The Bitcoin Core developers
+// Copyright (c) 2009-2019 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -17,7 +17,7 @@
 #include <atomic>
 #include <ctime>
 
-//!< For unit testing
+//! For unit testing
 static std::atomic<int64_t> nMockTime(0);
 
 int64_t GetTime() {
@@ -30,6 +30,18 @@ int64_t GetTime() {
     assert(now > 0);
     return now;
 }
+
+template <typename T> T GetTime() {
+    const std::chrono::seconds mocktime{
+        nMockTime.load(std::memory_order_relaxed)};
+
+    return std::chrono::duration_cast<T>(
+        mocktime.count() ? mocktime
+                         : std::chrono::microseconds{GetTimeMicros()});
+}
+template std::chrono::seconds GetTime();
+template std::chrono::milliseconds GetTime();
+template std::chrono::microseconds GetTime();
 
 void SetMockTime(int64_t nMockTimeIn) {
     nMockTime.store(nMockTimeIn, std::memory_order_relaxed);
@@ -66,7 +78,7 @@ void MilliSleep(int64_t n) {
 std::string FormatISO8601DateTime(int64_t nTime) {
     struct tm ts;
     time_t time_val = nTime;
-#ifdef _MSC_VER
+#ifdef _WIN32
     gmtime_s(&ts, &time_val);
 #else
     gmtime_r(&time_val, &ts);
@@ -79,7 +91,7 @@ std::string FormatISO8601DateTime(int64_t nTime) {
 std::string FormatISO8601Date(int64_t nTime) {
     struct tm ts;
     time_t time_val = nTime;
-#ifdef _MSC_VER
+#ifdef _WIN32
     gmtime_s(&ts, &time_val);
 #else
     gmtime_r(&time_val, &ts);
@@ -88,13 +100,18 @@ std::string FormatISO8601Date(int64_t nTime) {
                      ts.tm_mday);
 }
 
-std::string FormatISO8601Time(int64_t nTime) {
-    struct tm ts;
-    time_t time_val = nTime;
-#ifdef _MSC_VER
-    gmtime_s(&ts, &time_val);
-#else
-    gmtime_r(&time_val, &ts);
-#endif
-    return strprintf("%02i:%02i:%02iZ", ts.tm_hour, ts.tm_min, ts.tm_sec);
+int64_t ParseISO8601DateTime(const std::string &str) {
+    static const boost::posix_time::ptime epoch =
+        boost::posix_time::from_time_t(0);
+    static const std::locale loc(
+        std::locale::classic(),
+        new boost::posix_time::time_input_facet("%Y-%m-%dT%H:%M:%SZ"));
+    std::istringstream iss(str);
+    iss.imbue(loc);
+    boost::posix_time::ptime ptime(boost::date_time::not_a_date_time);
+    iss >> ptime;
+    if (ptime.is_not_a_date_time() || epoch > ptime) {
+        return 0;
+    }
+    return (ptime - epoch).total_seconds();
 }

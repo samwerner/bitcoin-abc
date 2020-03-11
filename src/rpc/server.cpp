@@ -1,5 +1,5 @@
 // Copyright (c) 2010 Satoshi Nakamoto
-// Copyright (c) 2009-2016 The Bitcoin Core developers
+// Copyright (c) 2009-2018 The Bitcoin Core developers
 // Copyright (c) 2018-2019 The Bitcoin developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
@@ -8,9 +8,10 @@
 
 #include <config.h>
 #include <fs.h>
-#include <init.h>
 #include <key_io.h>
 #include <random.h>
+#include <rpc/util.h>
+#include <shutdown.h>
 #include <sync.h>
 #include <ui_interface.h>
 #include <util/strencodings.h>
@@ -26,7 +27,7 @@
 #include <set>
 #include <unordered_map>
 
-static bool fRPCRunning = false;
+static std::atomic<bool> g_rpc_running{false};
 static bool fRPCInWarmup = true;
 static std::string rpcWarmupStatus("RPC server started");
 static CCriticalSection cs_rpcWarmup;
@@ -34,6 +35,32 @@ static CCriticalSection cs_rpcWarmup;
 static RPCTimerInterface *timerInterface = nullptr;
 /* Map of name to timer. */
 static std::map<std::string, std::unique_ptr<RPCTimerBase>> deadlineTimers;
+
+struct RPCCommandExecutionInfo {
+    std::string method;
+    int64_t start;
+};
+
+struct RPCServerInfo {
+    Mutex mutex;
+    std::list<RPCCommandExecutionInfo> active_commands GUARDED_BY(mutex);
+};
+
+static RPCServerInfo g_rpc_server_info;
+
+struct RPCCommandExecution {
+    std::list<RPCCommandExecutionInfo>::iterator it;
+    explicit RPCCommandExecution(const std::string &method) {
+        LOCK(g_rpc_server_info.mutex);
+        it = g_rpc_server_info.active_commands.insert(
+            g_rpc_server_info.active_commands.cend(),
+            {method, GetTimeMicros()});
+    }
+    ~RPCCommandExecution() {
+        LOCK(g_rpc_server_info.mutex);
+        g_rpc_server_info.active_commands.erase(it);
+    }
+};
 
 UniValue RPCServer::ExecuteCommand(Config &config,
                                    const JSONRPCRequest &request) const {
@@ -75,7 +102,6 @@ void RPCServer::RegisterCommand(std::unique_ptr<RPCCommand> command) {
 static struct CRPCSignals {
     boost::signals2::signal<void()> Started;
     boost::signals2::signal<void()> Stopped;
-    boost::signals2::signal<void(const ContextFreeRPCCommand &)> PreCommand;
 } g_rpcSignals;
 
 void RPCServerSignals::OnStarted(std::function<void()> slot) {
@@ -161,27 +187,20 @@ Amount AmountFromValue(const UniValue &value) {
 }
 
 uint256 ParseHashV(const UniValue &v, std::string strName) {
-    std::string strHex;
-    if (v.isStr()) {
-        strHex = v.get_str();
+    std::string strHex(v.get_str());
+    if (64 != strHex.length()) {
+        throw JSONRPCError(
+            RPC_INVALID_PARAMETER,
+            strprintf("%s must be of length %d (not %d, for '%s')", strName, 64,
+                      strHex.length(), strHex));
     }
-
     // Note: IsHex("") is false
     if (!IsHex(strHex)) {
         throw JSONRPCError(RPC_INVALID_PARAMETER,
                            strName + " must be hexadecimal string (not '" +
                                strHex + "')");
     }
-
-    if (strHex.length() != 64) {
-        throw JSONRPCError(RPC_INVALID_PARAMETER,
-                           strprintf("%s must be of length %d (not %d)",
-                                     strName, 64, strHex.length()));
-    }
-
-    uint256 result;
-    result.SetHex(strHex);
-    return result;
+    return uint256S(strHex);
 }
 uint256 ParseHashO(const UniValue &o, std::string strKey) {
     return ParseHashV(find_value(o, strKey), strKey);
@@ -228,11 +247,6 @@ std::string CRPCTable::help(Config &config, const std::string &strCommand,
          vCommands) {
         const ContextFreeRPCCommand *pcmd = command.second;
         std::string strMethod = pcmd->name;
-        // We already filter duplicates, but these deprecated screw up the sort
-        // order
-        if (strMethod.find("label") != std::string::npos) {
-            continue;
-        }
         if ((strCommand != "" || pcmd->category == "hidden") &&
             strMethod != strCommand) {
             continue;
@@ -291,6 +305,9 @@ static UniValue help(Config &config, const JSONRPCRequest &jsonRequest) {
 
 static UniValue stop(const Config &config, const JSONRPCRequest &jsonRequest) {
     // Accept the deprecated and ignored 'detach' boolean argument
+    // Also accept the hidden 'wait' integer argument (milliseconds)
+    // For instance, 'stop 1000' makes the call wait 1 second before returning
+    // to the client (intended for testing)
     if (jsonRequest.fHelp || jsonRequest.params.size() > 1) {
         throw std::runtime_error("stop\n"
                                  "\nStop Bitcoin server.");
@@ -299,12 +316,15 @@ static UniValue stop(const Config &config, const JSONRPCRequest &jsonRequest) {
     // Event loop will exit after current HTTP requests have been handled, so
     // this reply will get back to the client.
     StartShutdown();
+    if (jsonRequest.params[0].isNum()) {
+        MilliSleep(jsonRequest.params[0].get_int());
+    }
     return "Bitcoin server stopping";
 }
 
 static UniValue uptime(const Config &config,
                        const JSONRPCRequest &jsonRequest) {
-    if (jsonRequest.fHelp || jsonRequest.params.size() > 1) {
+    if (jsonRequest.fHelp || jsonRequest.params.size() > 0) {
         throw std::runtime_error("uptime\n"
                                  "\nReturns the total uptime of the server.\n"
                                  "\nResult:\n"
@@ -318,6 +338,29 @@ static UniValue uptime(const Config &config,
     return GetTime() - GetStartupTime();
 }
 
+static UniValue getrpcinfo(const Config &config,
+                           const JSONRPCRequest &request) {
+    if (request.fHelp || request.params.size() > 0) {
+        throw std::runtime_error("getrpcinfo\n"
+                                 "\nReturns details of the RPC server.\n");
+    }
+
+    LOCK(g_rpc_server_info.mutex);
+    UniValue active_commands(UniValue::VARR);
+    for (const RPCCommandExecutionInfo &info :
+         g_rpc_server_info.active_commands) {
+        UniValue entry(UniValue::VOBJ);
+        entry.pushKV("method", info.method);
+        entry.pushKV("duration", GetTimeMicros() - info.start);
+        active_commands.push_back(entry);
+    }
+
+    UniValue result(UniValue::VOBJ);
+    result.pushKV("active_commands", active_commands);
+
+    return result;
+}
+
 /**
  * Call Table
  */
@@ -326,8 +369,9 @@ static const ContextFreeRPCCommand vRPCCommands[] = {
     //  category            name                      actor (function)        argNames
     //  ------------------- ------------------------  ----------------------  ----------
     /* Overall control/query calls */
+    { "control",            "getrpcinfo",             getrpcinfo,             {}  },
     { "control",            "help",                   help,                   {"command"}  },
-    { "control",            "stop",                   stop,                   {}  },
+    { "control",            "stop",                   stop,                   {"wait"}  },
     { "control",            "uptime",                 uptime,                 {}  },
 };
 // clang-format on
@@ -373,14 +417,14 @@ bool CRPCTable::appendCommand(const std::string &name,
 
 void StartRPC() {
     LogPrint(BCLog::RPC, "Starting RPC\n");
-    fRPCRunning = true;
+    g_rpc_running = true;
     g_rpcSignals.Started();
 }
 
 void InterruptRPC() {
     LogPrint(BCLog::RPC, "Interrupting RPC\n");
     // Interrupt e.g. running longpolls
-    fRPCRunning = false;
+    g_rpc_running = false;
 }
 
 void StopRPC() {
@@ -391,7 +435,7 @@ void StopRPC() {
 }
 
 bool IsRPCRunning() {
-    return fRPCRunning;
+    return g_rpc_running;
 }
 
 void SetRPCWarmupStatus(const std::string &newStatus) {
@@ -520,9 +564,8 @@ UniValue CRPCTable::execute(Config &config,
         throw JSONRPCError(RPC_METHOD_NOT_FOUND, "Method not found");
     }
 
-    g_rpcSignals.PreCommand(*pcmd);
-
     try {
+        RPCCommandExecution execution(request.strMethod);
         // Execute, convert arguments to array if necessary
         if (request.params.isObject()) {
             return pcmd->call(config,

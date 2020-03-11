@@ -85,6 +85,23 @@ public:
     template <typename Stream> void Serialize(Stream &s) const {
         ::Serialize(s, getRawSigHashType());
     }
+
+    template <typename Stream> void Unserialize(Stream &s) {
+        ::Unserialize(s, sigHash);
+    }
+
+    /**
+     * Handy operators.
+     */
+    friend constexpr bool operator==(const SigHashType &a,
+                                     const SigHashType &b) {
+        return a.sigHash == b.sigHash;
+    }
+
+    friend constexpr bool operator!=(const SigHashType &a,
+                                     const SigHashType &b) {
+        return !(a == b);
+    }
 };
 
 #endif // BITCOIN_SCRIPT_SIGHASHTYPE_H

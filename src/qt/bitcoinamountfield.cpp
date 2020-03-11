@@ -6,6 +6,7 @@
 
 #include <qt/bitcoinunits.h>
 #include <qt/guiconstants.h>
+#include <qt/guiutil.h>
 #include <qt/qvaluecombobox.h>
 
 #include <QAbstractSpinBox>
@@ -27,8 +28,8 @@ public:
           singleStep(100000 * SATOSHI) {
         setAlignment(Qt::AlignRight);
 
-        connect(lineEdit(), SIGNAL(textEdited(QString)), this,
-                SIGNAL(valueChanged()));
+        connect(lineEdit(), &QLineEdit::textEdited, this,
+                &AmountSpinBox::valueChanged);
     }
 
     QValidator::State validate(QString &text, int &pos) const override {
@@ -52,7 +53,9 @@ public:
         }
     }
 
-    Amount value(bool *valid_out = 0) const { return parse(text(), valid_out); }
+    Amount value(bool *valid_out = nullptr) const {
+        return parse(text(), valid_out);
+    }
 
     void setValue(const Amount value) {
         lineEdit()->setText(BitcoinUnits::format(
@@ -88,9 +91,10 @@ public:
 
             const QFontMetrics fm(fontMetrics());
             int h = lineEdit()->minimumSizeHint().height();
-            int w = fm.width(BitcoinUnits::format(
-                BitcoinUnits::BCH, BitcoinUnits::maxMoney(), false,
-                BitcoinUnits::separatorAlways));
+            int w = GUIUtil::TextWidth(
+                fm, BitcoinUnits::format(BitcoinUnits::BCH,
+                                         BitcoinUnits::maxMoney(), false,
+                                         BitcoinUnits::separatorAlways));
             // Cursor blinking space.
             w += 2;
 
@@ -134,7 +138,7 @@ private:
      * return validity.
      * @note Must return 0 if !valid.
      */
-    Amount parse(const QString &text, bool *valid_out = 0) const {
+    Amount parse(const QString &text, bool *valid_out = nullptr) const {
         Amount val = Amount::zero();
         bool valid = BitcoinUnits::parse(currentUnit, text, &val);
         if (valid) {
@@ -174,7 +178,7 @@ protected:
             return StepUpEnabled;
         }
 
-        StepEnabled rv = 0;
+        StepEnabled rv = StepNone;
         bool valid = false;
         Amount val = value(&valid);
         if (valid) {
@@ -195,7 +199,7 @@ Q_SIGNALS:
 #include <qt/bitcoinamountfield.moc>
 
 BitcoinAmountField::BitcoinAmountField(QWidget *parent)
-    : QWidget(parent), amount(0) {
+    : QWidget(parent), amount(nullptr) {
     amount = new AmountSpinBox(this);
     amount->setLocale(QLocale::c());
     amount->installEventFilter(this);
@@ -215,9 +219,12 @@ BitcoinAmountField::BitcoinAmountField(QWidget *parent)
     setFocusProxy(amount);
 
     // If one if the widgets changes, the combined content changes as well
-    connect(amount, SIGNAL(valueChanged()), this, SIGNAL(valueChanged()));
-    connect(unit, SIGNAL(currentIndexChanged(int)), this,
-            SLOT(unitChanged(int)));
+    connect(amount, &AmountSpinBox::valueChanged, this,
+            &BitcoinAmountField::valueChanged);
+    connect(
+        unit,
+        static_cast<void (QComboBox::*)(int)>(&QComboBox::currentIndexChanged),
+        this, &BitcoinAmountField::unitChanged);
 
     // Set default based on configuration
     unitChanged(unit->currentIndex());

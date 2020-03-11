@@ -1,10 +1,16 @@
+// Copyright (c) 2017-2020 The Bitcoin developers
+// Distributed under the MIT software license, see the accompanying
+// file COPYING or http://www.opensource.org/licenses/mit-license.php.
+
 #include <seeder/db.h>
 
 #include <cstdlib>
 
 void CAddrInfo::Update(bool good) {
     int64_t now = time(nullptr);
-    if (ourLastTry == 0) ourLastTry = now - MIN_RETRY;
+    if (ourLastTry == 0) {
+        ourLastTry = now - MIN_RETRY;
+    }
     int age = now - ourLastTry;
     lastTry = now;
     ourLastTry = now;
@@ -19,8 +25,9 @@ void CAddrInfo::Update(bool good) {
     stat1W.Update(good, age, 3600 * 24 * 7);
     stat1M.Update(good, age, 3600 * 24 * 30);
     int64_t ign = GetIgnoreTime();
-    if (ign && (ignoreTill == 0 || ignoreTill < ign + now))
+    if (ign && (ignoreTill == 0 || ignoreTill < ign + now)) {
         ignoreTill = ign + now;
+    }
     //  fprintf(stdout, "%s: got %s result: success=%i/%i;
     //  2H:%.2f%%-%.2f%%(%.2f) 8H:%.2f%%-%.2f%%(%.2f) 1D:%.2f%%-%.2f%%(%.2f)
     //  1W:%.2f%%-%.2f%%(%.2f) \n", ToString(ip).c_str(), good ? "good" : "bad",
@@ -71,14 +78,18 @@ bool CAddrDb::Get_(CServiceResult &ip, int &wait) {
 }
 
 int CAddrDb::Lookup_(const CService &ip) {
-    if (ipToId.count(ip)) return ipToId[ip];
+    if (ipToId.count(ip)) {
+        return ipToId[ip];
+    }
     return -1;
 }
 
 void CAddrDb::Good_(const CService &addr, int clientV, std::string clientSV,
                     int blocks) {
     int id = Lookup_(addr);
-    if (id == -1) return;
+    if (id == -1) {
+        return;
+    }
     unkId.erase(id);
     banned.erase(addr);
     CAddrInfo &info = idToInfo[id];
@@ -97,7 +108,9 @@ void CAddrDb::Good_(const CService &addr, int clientV, std::string clientSV,
 
 void CAddrDb::Bad_(const CService &addr, int ban) {
     int id = Lookup_(addr);
-    if (id == -1) return;
+    if (id == -1) {
+        return;
+    }
     unkId.erase(id);
     CAddrInfo &info = idToInfo[id];
     info.Update(false);
@@ -105,7 +118,9 @@ void CAddrDb::Bad_(const CService &addr, int ban) {
     int ter = info.GetBanTime();
     if (ter) {
         //    fprintf(stdout, "%s: terrible\n", ToString(addr).c_str());
-        if (ban < ter) ban = ter;
+        if (ban < ter) {
+            ban = ter;
+        }
     }
     if (ban > 0) {
         //    fprintf(stdout, "%s: ban for %i seconds\n",
@@ -122,15 +137,6 @@ void CAddrDb::Bad_(const CService &addr, int ban) {
         }
         ourId.push_back(id);
     }
-    nDirty++;
-}
-
-void CAddrDb::Skipped_(const CService &addr) {
-    int id = Lookup_(addr);
-    if (id == -1) return;
-    unkId.erase(id);
-    ourId.push_back(id);
-    //  fprintf(stdout, "%s: skipped\n", ToString(addr).c_str());
     nDirty++;
 }
 

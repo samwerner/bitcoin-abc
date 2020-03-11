@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright (c) 2017-2017 The Bitcoin Core developers
+# Copyright (c) 2017-2019 The Bitcoin Core developers
 # Distributed under the MIT software license, see the accompanying
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -60,7 +60,8 @@ class GetblockstatsTest(BitcoinTestFramework):
         self.setup_clean_chain = True
 
     def get_stats(self):
-        return [self.nodes[0].getblockstats(hash_or_height=self.start_height + i) for i in range(self.max_stat_pos + 1)]
+        return [self.nodes[0].getblockstats(
+            hash_or_height=self.start_height + i) for i in range(self.max_stat_pos + 1)]
 
     def generate_test_data(self, filename):
         mocktime = time.time()
@@ -108,7 +109,8 @@ class GetblockstatsTest(BitcoinTestFramework):
             self.expected_stats = d['stats']
             self.log.info(self.expected_stats)
 
-        # Set the timestamps from the file so that the nodes can get out of Initial Block Download
+        # Set the timestamps from the file so that the nodes can get out of
+        # Initial Block Download
         self.nodes[0].setmocktime(mocktime)
         self.nodes[1].setmocktime(mocktime)
 

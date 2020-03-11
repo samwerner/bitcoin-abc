@@ -86,7 +86,9 @@ void FreespaceChecker::check() {
 
         /* Check if we make any progress, break if not to prevent an infinite
          * loop here */
-        if (parentDirOld == parentDir) break;
+        if (parentDirOld == parentDir) {
+            break;
+        }
 
         parentDirOld = parentDir;
     }
@@ -116,7 +118,7 @@ void FreespaceChecker::check() {
 }
 
 Intro::Intro(QWidget *parent)
-    : QDialog(parent), ui(new Ui::Intro), thread(0), signalled(false) {
+    : QDialog(parent), ui(new Ui::Intro), thread(nullptr), signalled(false) {
     ui->setupUi(this);
     ui->welcomeLabel->setText(ui->welcomeLabel->text().arg(tr(PACKAGE_NAME)));
     ui->storageLabel->setText(ui->storageLabel->text().arg(tr(PACKAGE_NAME)));
@@ -186,7 +188,9 @@ bool Intro::pickDataDirectory(interfaces::Node &node) {
     QSettings settings;
     /* If data directory provided on command line, no need to look at settings
        or show a picking dialog */
-    if (!gArgs.GetArg("-datadir", "").empty()) return true;
+    if (!gArgs.GetArg("-datadir", "").empty()) {
+        return true;
+    }
     /* 1) Default data directory for operating system */
     QString dataDir = getDefaultDataDirectory();
     /* 2) Allow QSettings to override default dir */
@@ -218,7 +222,7 @@ bool Intro::pickDataDirectory(interfaces::Node &node) {
                 }
                 break;
             } catch (const fs::filesystem_error &) {
-                QMessageBox::critical(0, tr(PACKAGE_NAME),
+                QMessageBox::critical(nullptr, tr(PACKAGE_NAME),
                                       tr("Error: Specified data directory "
                                          "\"%1\" cannot be created.")
                                           .arg(dataDir));
@@ -281,8 +285,10 @@ void Intro::on_dataDirectory_textChanged(const QString &dataDirStr) {
 
 void Intro::on_ellipsisButton_clicked() {
     QString dir = QDir::toNativeSeparators(QFileDialog::getExistingDirectory(
-        0, "Choose data directory", ui->dataDirectory->text()));
-    if (!dir.isEmpty()) ui->dataDirectory->setText(dir);
+        nullptr, "Choose data directory", ui->dataDirectory->text()));
+    if (!dir.isEmpty()) {
+        ui->dataDirectory->setText(dir);
+    }
 }
 
 void Intro::on_dataDirDefault_clicked() {
@@ -299,12 +305,11 @@ void Intro::startThread() {
     FreespaceChecker *executor = new FreespaceChecker(this);
     executor->moveToThread(thread);
 
-    connect(executor, SIGNAL(reply(int, QString, quint64)), this,
-            SLOT(setStatus(int, QString, quint64)));
-    connect(this, SIGNAL(requestCheck()), executor, SLOT(check()));
+    connect(executor, &FreespaceChecker::reply, this, &Intro::setStatus);
+    connect(this, &Intro::requestCheck, executor, &FreespaceChecker::check);
     /*  make sure executor object is deleted in its own thread */
-    connect(this, SIGNAL(stopThread()), executor, SLOT(deleteLater()));
-    connect(this, SIGNAL(stopThread()), thread, SLOT(quit()));
+    connect(this, &Intro::stopThread, executor, &QObject::deleteLater);
+    connect(this, &Intro::stopThread, thread, &QThread::quit);
 
     thread->start();
 }

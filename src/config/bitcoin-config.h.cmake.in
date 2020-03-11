@@ -60,6 +60,9 @@
 
 #cmakedefine HAVE_DECL_EVP_MD_CTX_NEW 1
 
+#define FDELT_TYPE ${FDELT_TYPE}
+
+#cmakedefine ENABLE_BIP70 1
 #cmakedefine ENABLE_WALLET 1
 #cmakedefine ENABLE_ZMQ 1
 
@@ -72,5 +75,8 @@
 /* Value (0 or 1) determines the UPnP default state at startup. */
 #cmakedefine01 USE_UPNP
 #endif
+
+/* Define if QtDBus support should be enabled */
+#cmakedefine USE_DBUS 1
 
 #endif // BITCOIN_BITCOIN_CONFIG_H

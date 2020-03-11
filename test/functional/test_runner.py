@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright (c) 2014-2016 The Bitcoin Core developers
+# Copyright (c) 2014-2019 The Bitcoin Core developers
 # Copyright (c) 2017 The Bitcoin developers
 # Distributed under the MIT software license, see the accompanying
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
@@ -58,7 +58,8 @@ TEST_EXIT_PASSED = 0
 TEST_EXIT_SKIPPED = 77
 
 NON_SCRIPTS = [
-    # These are python files that live in the functional tests directory, but are not test scripts.
+    # These are python files that live in the functional tests directory, but
+    # are not test scripts.
     "combine_logs.py",
     "create_cache.py",
     "test_runner.py",
@@ -76,12 +77,14 @@ TEST_PARAMS = {
     #    testname --param3
     "wallet_txn_doublespend.py": [["--mineblock"]],
     "wallet_txn_clone.py": [["--mineblock"]],
+    "wallet_createwallet.py": [["--usecli"]],
     "wallet_multiwallet.py": [["--usecli"]],
 }
 
 # Used to limit the number of tests, when list of tests is not provided on command line
 # When --extended is specified, we run all tests, otherwise
-# we only run a test if its execution time in seconds does not exceed EXTENDED_CUTOFF
+# we only run a test if its execution time in seconds does not exceed
+# EXTENDED_CUTOFF
 DEFAULT_EXTENDED_CUTOFF = 40
 DEFAULT_JOBS = (multiprocessing.cpu_count() // 3) + 1
 
@@ -127,11 +130,13 @@ class TestCase():
         else:
             status = "Failed"
 
-        return TestResult(self.test_num, name, testdir, status, int(time.time() - time0), stdout, stderr)
+        return TestResult(self.test_num, name, testdir, status,
+                          int(time.time() - time0), stdout, stderr)
 
 
 def on_ci():
-    return os.getenv('TRAVIS') == 'true' or os.getenv('TEAMCITY_VERSION') != None
+    return os.getenv('TRAVIS') == 'true' or os.getenv(
+        'TEAMCITY_VERSION') is not None
 
 
 def main():
@@ -151,7 +156,7 @@ def main():
                                      description=__doc__,
                                      epilog='''
     Help text and arguments for individual test script:''',
-                                     formatter_class=argparse.RawTextHelpFormatter)
+                                     formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument('--combinedlogslen', '-c', type=int, default=0,
                         help='print a combined log (of length n lines) from all test nodes and test framework to the console on failure.')
     parser.add_argument('--coverage', action='store_true',
@@ -167,15 +172,17 @@ def main():
     parser.add_argument('--help', '-h', '-?',
                         action='store_true', help='print help text and exit')
     parser.add_argument('--jobs', '-j', type=int, default=DEFAULT_JOBS,
-                        help='how many test scripts to run in parallel. Default=4.')
+                        help='how many test scripts to run in parallel.')
     parser.add_argument('--keepcache', '-k', action='store_true',
                         help='the default behavior is to flush the cache directory on startup. --keepcache retains the cache from the previous testrun.')
     parser.add_argument('--quiet', '-q', action='store_true',
                         help='only print results summary and failure logs')
     parser.add_argument('--tmpdirprefix', '-t',
-                        default=tempfile.gettempdir(), help="Root directory for datadirs")
-    parser.add_argument('--junitoutput', '-J',
-                        default=os.path.join(build_dir, 'junit_results.xml'), help="file that will store JUnit formatted test results.")
+                        default=os.path.join(build_dir, 'test', 'tmp'), help="Root directory for datadirs")
+    parser.add_argument('--junitoutput', '-J', default='junit_results.xml',
+                        help="File that will store JUnit formatted test results. If no absolute path is given it is treated as relative to the temporary directory.")
+    parser.add_argument('--testsuitename', '-n', default='Bitcoin ABC functional tests',
+                        help="Name of the test suite, as it will appear in the logs and in the JUnit report.")
 
     args, unknown_args = parser.parse_known_args()
 
@@ -188,6 +195,7 @@ def main():
     # Set up logging
     logging_level = logging.INFO if args.quiet else logging.DEBUG
     logging.basicConfig(format='%(message)s', level=logging_level)
+    logging.info("Starting {}".format(args.testsuitename))
 
     # Create base test directory
     tmpdir = os.path.join("{}", "bitcoin_test_runner_{:%Y%m%d_%H%M%S}").format(
@@ -196,8 +204,9 @@ def main():
 
     logging.debug("Temporary test directory at {}".format(tmpdir))
 
-    enable_wallet = config["components"].getboolean("ENABLE_WALLET")
-    enable_utils = config["components"].getboolean("ENABLE_UTILS")
+    if not os.path.isabs(args.junitoutput):
+        args.junitoutput = os.path.join(tmpdir, args.junitoutput)
+
     enable_bitcoind = config["components"].getboolean("ENABLE_BITCOIND")
 
     if config["environment"]["EXEEXT"] == ".exe" and not args.force:
@@ -207,11 +216,9 @@ def main():
             "Tests currently disabled on Windows by default. Use --force option to enable")
         sys.exit(0)
 
-    if not (enable_wallet and enable_utils and enable_bitcoind):
-        print(
-            "No functional tests to run. Wallet, utils, and bitcoind must all be enabled")
-        print(
-            "Rerun `configure` with -enable-wallet, -with-utils and -with-daemon and rerun make")
+    if not enable_bitcoind:
+        print("No functional tests to run.")
+        print("Rerun ./configure with --with-daemon and then make")
         sys.exit(0)
 
     # Build list of tests
@@ -219,7 +226,7 @@ def main():
 
     # Check all tests with parameters actually exist
     for test in TEST_PARAMS:
-        if not test in all_scripts:
+        if test not in all_scripts:
             print("ERROR: Test with parameter {} does not exist, check it has "
                   "not been renamed or deleted".format(test))
             sys.exit(1)
@@ -257,8 +264,8 @@ def main():
 
     # Remove the test cases that the user has explicitly asked to exclude.
     if args.exclude:
-        tests_excl = [re.sub(r"\.py$", "", t) +
-                      ".py" for t in args.exclude.split(',')]
+        tests_excl = [re.sub(r"\.py$", "", t)
+                      + ".py" for t in args.exclude.split(',')]
         for exclude_test in tests_excl:
             if exclude_test in test_list:
                 test_list.remove(exclude_test)
@@ -298,10 +305,11 @@ def main():
                                    "cache"), ignore_errors=True)
 
     run_tests(test_list, build_dir, tests_dir, args.junitoutput,
-              tmpdir, args.jobs, args.coverage, passon_args, args.combinedlogslen, build_timings)
+              tmpdir, args.jobs, args.testsuitename, args.coverage, passon_args, args.combinedlogslen, build_timings)
 
 
-def run_tests(test_list, build_dir, tests_dir, junitoutput, tmpdir, num_jobs, enable_coverage=False, args=[], combined_logs_len=0, build_timings=None):
+def run_tests(test_list, build_dir, tests_dir, junitoutput, tmpdir, num_jobs, test_suite_name,
+              enable_coverage=False, args=[], combined_logs_len=0, build_timings=None):
     # Warn if bitcoind is already running (unix only)
     try:
         pidofOutput = subprocess.check_output(["pidof", "bitcoind"])
@@ -345,7 +353,7 @@ def run_tests(test_list, build_dir, tests_dir, junitoutput, tmpdir, num_jobs, en
     max_len_name = len(max(test_list, key=len))
     print_results(test_results, tests_dir, max_len_name,
                   runtime, combined_logs_len)
-    save_results_as_junit(test_results, junitoutput, runtime)
+    save_results_as_junit(test_results, junitoutput, runtime, test_suite_name)
 
     if (build_timings is not None):
         build_timings.save_timings(test_results)
@@ -437,14 +445,15 @@ def execute_test_processes(num_jobs, test_list, tests_dir, tmpdir, flags):
                 update_queue.task_done()
             except Empty:
                 if not on_ci():
-                    print("Running jobs: {}".format(", ".join([j[1] for j in running_jobs])), end="\r")
+                    print("Running jobs: {}".format(
+                        ", ".join([j[1] for j in running_jobs])), end="\r")
                     sys.stdout.flush()
                     printed_status = True
 
     def handle_test_cases():
         """
-        job_runner represents a single thread that is part of a worker pool.  
-        It waits for a test, then executes that test. 
+        job_runner represents a single thread that is part of a worker pool.
+        It waits for a test, then executes that test.
         It also reports start and result messages to handle_update_messages
         """
         while True:
@@ -491,7 +500,8 @@ def execute_test_processes(num_jobs, test_list, tests_dir, tmpdir, flags):
     return test_results
 
 
-def print_results(test_results, tests_dir, max_len_name, runtime, combined_logs_len):
+def print_results(test_results, tests_dir, max_len_name,
+                  runtime, combined_logs_len):
     results = "\n" + BOLD[1] + "{} | {} | {}\n\n".format(
         "TEST".ljust(max_len_name), "STATUS   ", "DURATION") + BOLD[0]
 
@@ -515,7 +525,11 @@ def print_results(test_results, tests_dir, max_len_name, runtime, combined_logs_
             print('============\n')
             combined_logs, _ = subprocess.Popen([sys.executable, os.path.join(
                 tests_dir, 'combine_logs.py'), '-c', testdir], universal_newlines=True, stdout=subprocess.PIPE).communicate()
-            print("\n".join(deque(combined_logs.splitlines(), combined_logs_len)))
+            print(
+                "\n".join(
+                    deque(
+                        combined_logs.splitlines(),
+                        combined_logs_len)))
 
     status = TICK + "Passed" if all_passed else CROSS + "Failed"
     if not all_passed:
@@ -590,7 +604,8 @@ def get_tests_to_run(test_list, test_params, cutoff, src_timings):
         return next(
             (x['time'] for x in src_timings.existing_timings if x['name'] == test), 0)
 
-    # Some tests must also be run with additional parameters. Add them to the list.
+    # Some tests must also be run with additional parameters. Add them to the
+    # list.
     tests_with_params = []
     for test_name in test_list:
         # always execute a test without parameters
@@ -601,7 +616,7 @@ def get_tests_to_run(test_list, test_params, cutoff, src_timings):
                 [test_name + " " + " ".join(p) for p in params])
 
     result = [t for t in tests_with_params if get_test_time(t) <= cutoff]
-    result.sort(key=lambda x:  (-get_test_time(x), x))
+    result.sort(key=lambda x: (-get_test_time(x), x))
     return result
 
 
@@ -673,14 +688,14 @@ class RPCCoverage():
         return all_cmds - covered_cmds
 
 
-def save_results_as_junit(test_results, file_name, time):
+def save_results_as_junit(test_results, file_name, time, test_suite_name):
     """
     Save tests results to file in JUnit format
 
     See http://llg.cubic.org/docs/junit/ for specification of format
     """
     e_test_suite = ET.Element("testsuite",
-                              {"name": "bitcoin_abc_tests",
+                              {"name": "{}".format(test_suite_name),
                                "tests": str(len(test_results)),
                                # "errors":
                                "failures": str(len([t for t in test_results if t.status == "Failed"])),
@@ -749,7 +764,7 @@ class Timings():
         # we only save test that have passed - timings for failed test might be
         # wrong (timeouts or early fails)
         passed_results = [t for t in test_results if t.status == 'Passed']
-        new_timings = list(map(lambda t: {'name':  t.name, 'time': t.time},
+        new_timings = list(map(lambda t: {'name': t.name, 'time': t.time},
                                passed_results))
         merged_timings = self.get_merged_timings(new_timings)
 

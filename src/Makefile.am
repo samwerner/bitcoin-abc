@@ -4,8 +4,8 @@
 
 DIST_SUBDIRS = secp256k1 univalue
 
-AM_LDFLAGS = $(PTHREAD_CFLAGS) $(LIBTOOL_LDFLAGS) $(HARDENED_LDFLAGS) $(SANITIZER_LDFLAGS)
-AM_CXXFLAGS = $(DEBUG_CXXFLAGS) $(HARDENED_CXXFLAGS) $(WARN_CXXFLAGS) $(NOWARN_CXXFLAGS) $(ERROR_CXXFLAGS) $(SANITIZER_CXXFLAGS)
+AM_LDFLAGS = $(PTHREAD_CFLAGS) $(LIBTOOL_LDFLAGS) $(HARDENED_LDFLAGS) $(GPROF_LDFLAGS) $(SANITIZER_LDFLAGS)
+AM_CXXFLAGS = $(DEBUG_CXXFLAGS) $(HARDENED_CXXFLAGS) $(WARN_CXXFLAGS) $(NOWARN_CXXFLAGS) $(ERROR_CXXFLAGS) $(GPROF_CXXFLAGS) $(SANITIZER_CXXFLAGS)
 AM_CPPFLAGS = $(DEBUG_CPPFLAGS) $(HARDENED_CPPFLAGS)
 AM_LIBTOOLFLAGS = --preserve-dup-deps
 EXTRA_LIBRARIES =
@@ -103,6 +103,7 @@ endif
 BITCOIN_CORE_H = \
   addrdb.h \
   addrman.h \
+  attributes.h \
   avalanche.h \
   banman.h \
   base58.h \
@@ -147,6 +148,7 @@ BITCOIN_CORE_H = \
   index/txindex.h \
   indirectmap.h \
   init.h \
+  interfaces/chain.h \
   interfaces/handler.h \
   interfaces/node.h \
   interfaces/wallet.h \
@@ -159,13 +161,16 @@ BITCOIN_CORE_H = \
   memusage.h \
   merkleblock.h \
   miner.h \
+  minerfund.h \
   net.h \
   net_processing.h \
   netaddress.h \
   netbase.h \
   netmessagemaker.h \
   noui.h \
+  outputtype.h \
   policy/fees.h \
+  policy/mempool.h \
   policy/policy.h \
   pow.h \
   protocol.h \
@@ -187,11 +192,13 @@ BITCOIN_CORE_H = \
   rpc/util.h \
   rwcollection.h \
   scheduler.h \
-  script/scriptcache.h \
+  script/descriptor.h \
   script/ismine.h \
+  script/scriptcache.h \
   script/sigcache.h \
   script/sign.h \
   script/standard.h \
+  shutdown.h \
   streams.h \
   support/allocators/secure.h \
   support/allocators/zeroafterfree.h \
@@ -215,6 +222,7 @@ BITCOIN_CORE_H = \
   validation.h \
   validationinterface.h \
   versionbits.h \
+  versionbitsinfo.h \
   walletinitinterface.h \
   wallet/coincontrol.h \
   wallet/coinselection.h \
@@ -231,7 +239,8 @@ BITCOIN_CORE_H = \
   zmq/zmqabstractnotifier.h \
   zmq/zmqconfig.h\
   zmq/zmqnotificationinterface.h \
-  zmq/zmqpublishnotifier.h
+  zmq/zmqpublishnotifier.h \
+  zmq/zmqrpc.h
 
 
 obj/build.h: FORCE
@@ -263,15 +272,19 @@ libbitcoin_server_a_SOURCES = \
   index/base.cpp \
   index/txindex.cpp \
   init.cpp \
+  interfaces/chain.cpp \
   interfaces/handler.cpp \
   interfaces/node.cpp \
   dbwrapper.cpp \
   merkleblock.cpp \
   miner.cpp \
+  minerfund.cpp \
   net.cpp \
   net_processing.cpp \
   noui.cpp \
+  outputtype.cpp \
   policy/fees.cpp \
+  policy/mempool.cpp \
   policy/policy.cpp \
   pow.cpp \
   rest.cpp \
@@ -286,6 +299,7 @@ libbitcoin_server_a_SOURCES = \
   rpc/server.cpp \
   script/scriptcache.cpp \
   script/sigcache.cpp \
+  shutdown.cpp \
   timedata.cpp \
   torcontrol.cpp \
   txdb.cpp \
@@ -293,7 +307,12 @@ libbitcoin_server_a_SOURCES = \
   ui_interface.cpp \
   validation.cpp \
   validationinterface.cpp \
+  versionbits.cpp \
   $(BITCOIN_CORE_H)
+
+if !ENABLE_WALLET
+libbitcoin_server_a_SOURCES += dummywallet.cpp
+endif
 
 if ENABLE_ZMQ
 libbitcoin_zmq_a_CPPFLAGS = $(BITCOIN_INCLUDES) $(ZMQ_CFLAGS)
@@ -301,7 +320,8 @@ libbitcoin_zmq_a_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
 libbitcoin_zmq_a_SOURCES = \
   zmq/zmqabstractnotifier.cpp \
   zmq/zmqnotificationinterface.cpp \
-  zmq/zmqpublishnotifier.cpp
+  zmq/zmqpublishnotifier.cpp \
+  zmq/zmqrpc.cpp
 endif
 
 
@@ -404,6 +424,7 @@ libbitcoin_consensus_a_SOURCES = \
   script/script_error.cpp \
   script/script_error.h \
   script/script_flags.h \
+  script/script_metrics.h \
   script/sigencoding.cpp \
   script/sigencoding.h \
   serialize.h \
@@ -438,9 +459,11 @@ libbitcoin_common_a_SOURCES = \
   netbase.cpp \
   protocol.cpp \
   scheduler.cpp \
+  script/descriptor.cpp \
   script/ismine.cpp \
   script/sign.cpp \
   script/standard.cpp \
+  versionbitsinfo.cpp \
   warnings.cpp \
   $(BITCOIN_CORE_H)
 
@@ -514,6 +537,7 @@ endif
 bitcoind_LDADD = \
   $(LIBBITCOIN_SERVER) \
   $(LIBBITCOIN_WALLET) \
+  $(LIBBITCOIN_SERVER) \
   $(LIBBITCOIN_COMMON) \
   $(LIBUNIVALUE) \
   $(LIBBITCOIN_UTIL) \
@@ -556,7 +580,8 @@ bitcoin_seeder_LDADD = \
   $(LIBBITCOIN_SEEDER) \
   $(LIBBITCOIN_COMMON) \
   $(LIBBITCOIN_UTIL) \
-  $(LIBBITCOIN_CRYPTO)
+  $(LIBBITCOIN_CRYPTO) \
+  $(LIBBITCOIN_CONSENSUS)
 
 bitcoin_seeder_LDADD += $(BOOST_LIBS) $(CRYPTO_LIBS)
 #
@@ -658,9 +683,11 @@ if HARDEN
 	$(AM_V_at) READELF=$(READELF) OBJDUMP=$(OBJDUMP) $(top_srcdir)/contrib/devtools/security-check.py < $(bin_PROGRAMS)
 endif
 
+if ENABLE_BIP70
 %.pb.cc %.pb.h: %.proto
 	@test -f $(PROTOC)
 	$(AM_V_GEN) $(PROTOC) --cpp_out=$(@D) --proto_path=$(<D) $<
+endif
 
 if EMBEDDED_LEVELDB
 include Makefile.leveldb.include
@@ -680,4 +707,8 @@ endif
 
 if ENABLE_QT_TESTS
 include Makefile.qttest.include
+endif
+
+if ENABLE_SEEDER_TESTS
+include Makefile.seedertest.include
 endif

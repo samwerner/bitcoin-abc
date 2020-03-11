@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-# Copyright (c) 2014-2016 The Bitcoin Core developers
+# Copyright (c) 2014-2019 The Bitcoin Core developers
 # Distributed under the MIT software license, see the accompanying
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
 """Helpful routines for regression testing."""
 
 from base64 import b64encode
-from binascii import hexlify, unhexlify
+from binascii import unhexlify
 from decimal import Decimal, ROUND_DOWN
 import hashlib
 import inspect
@@ -134,7 +134,8 @@ def try_rpc(code, message, fun, *args, **kwds):
     try:
         fun(*args, **kwds)
     except JSONRPCException as e:
-        # JSONRPCException was thrown as expected. Check the code and message values are correct.
+        # JSONRPCException was thrown as expected. Check the code and message
+        # values are correct.
         if (code is not None) and (code != e.error["code"]):
             raise AssertionError(
                 "Unexpected JSONRPC error code {}".format(e.error["code"]))
@@ -169,7 +170,8 @@ def assert_is_hash_string(string, length=64):
             "String {!r} contains invalid characters for a hash.".format(string))
 
 
-def assert_array_result(object_array, to_match, expected, should_not_find=False):
+def assert_array_result(object_array, to_match, expected,
+                        should_not_find=False):
     """
     Pass in array of JSON objects, a dictionary with key/value pairs
     to match against, and another dictionary with expected key/value
@@ -215,10 +217,6 @@ def count_bytes(hex_string):
     return len(bytearray.fromhex(hex_string))
 
 
-def bytes_to_hex_str(byte_str):
-    return hexlify(byte_str).decode('ascii')
-
-
 def hash256(byte_str):
     sha256 = hashlib.sha256()
     sha256.update(byte_str)
@@ -239,7 +237,8 @@ def satoshi_round(amount):
     return Decimal(amount).quantize(Decimal('0.00000001'), rounding=ROUND_DOWN)
 
 
-def wait_until(predicate, *, attempts=float('inf'), timeout=float('inf'), lock=None):
+def wait_until(predicate, *, attempts=float('inf'),
+               timeout=float('inf'), lock=None):
     if attempts == float('inf') and timeout == float('inf'):
         timeout = 60
     attempt = 0
@@ -311,17 +310,19 @@ def get_rpc_proxy(url, node_number, timeout=None, coveragedir=None):
 
 
 def p2p_port(n):
-    assert(n <= MAX_NODES)
-    return PORT_MIN + n + (MAX_NODES * PortSeed.n) % (PORT_RANGE - 1 - MAX_NODES)
+    assert n <= MAX_NODES
+    return PORT_MIN + n + \
+        (MAX_NODES * PortSeed.n) % (PORT_RANGE - 1 - MAX_NODES)
 
 
 def rpc_port(n):
-    return PORT_MIN + PORT_RANGE + n + (MAX_NODES * PortSeed.n) % (PORT_RANGE - 1 - MAX_NODES)
+    return PORT_MIN + PORT_RANGE + n + \
+        (MAX_NODES * PortSeed.n) % (PORT_RANGE - 1 - MAX_NODES)
 
 
 def rpc_url(datadir, host, port):
     rpc_u, rpc_p = get_auth_cookie(datadir)
-    if host == None:
+    if host is None:
         host = '127.0.0.1'
     return "http://{}:{}@{}:{}".format(rpc_u, rpc_p, host, int(port))
 
@@ -370,12 +371,14 @@ def get_auth_cookie(datadir):
                 if line.startswith("rpcpassword="):
                     assert password is None  # Ensure that there is only one rpcpassword line
                     password = line.split("=")[1].strip("\n")
-    if os.path.isfile(os.path.join(datadir, "regtest", ".cookie")):
+    try:
         with open(os.path.join(datadir, "regtest", ".cookie"), 'r', encoding="ascii") as f:
             userpass = f.read()
             split_userpass = userpass.split(':')
             user = split_userpass[0]
             password = split_userpass[1]
+    except OSError:
+        pass
     if user is None or password is None:
         raise ValueError("No RPC credentials")
     return user, password
@@ -394,7 +397,8 @@ def set_node_times(nodes, t):
 
 
 def disconnect_nodes(from_node, to_node):
-    for peer_id in [peer['id'] for peer in from_node.getpeerinfo() if to_node.name in peer['subver']]:
+    for peer_id in [peer['id'] for peer in from_node.getpeerinfo(
+    ) if to_node.name in peer['subver']]:
         try:
             from_node.disconnectnode(nodeid=peer_id)
         except JSONRPCException as e:
@@ -411,14 +415,14 @@ def disconnect_nodes(from_node, to_node):
 
 def connect_nodes(from_node, to_node):
     host = to_node.host
-    if host == None:
+    if host is None:
         host = '127.0.0.1'
     ip_port = host + ':' + str(to_node.p2p_port)
     from_node.addnode(ip_port, "onetry")
     # poll until version handshake complete to avoid race conditions
     # with transaction relaying
-    wait_until(lambda: all(peer['version'] !=
-                           0 for peer in from_node.getpeerinfo()))
+    wait_until(lambda: all(peer['version']
+                           != 0 for peer in from_node.getpeerinfo()))
 
 
 def connect_nodes_bi(a, b):
@@ -444,7 +448,8 @@ def sync_blocks(rpc_connections, *, wait=1, timeout=60):
         "".join("\n  {!r}".format(b) for b in best_hash)))
 
 
-def sync_mempools(rpc_connections, *, wait=1, timeout=60, flush_scheduler=True):
+def sync_mempools(rpc_connections, *, wait=1,
+                  timeout=60, flush_scheduler=True):
     """
     Wait until everybody has the same transactions in their memory
     pools
@@ -482,7 +487,7 @@ def gather_inputs(from_node, amount_needed, confirmations_required=1):
     """
     Return a random set of unspent txouts that are enough to pay amount_needed
     """
-    assert(confirmations_required >= 0)
+    assert confirmations_required >= 0
     utxo = from_node.listunspent(confirmations_required)
     random.shuffle(utxo)
     inputs = []
@@ -515,49 +520,6 @@ def make_change(from_node, amount_in, amount_out, fee):
     if change > 0:
         outputs[from_node.getnewaddress()] = change
     return outputs
-
-
-def send_zeropri_transaction(from_node, to_node, amount, fee):
-    """
-    Create&broadcast a zero-priority transaction.
-    Returns (txid, hex-encoded-txdata)
-    Ensures transaction is zero-priority by first creating a send-to-self,
-    then using its output
-    """
-
-    # Create a send-to-self with confirmed inputs:
-    self_address = from_node.getnewaddress()
-    (total_in, inputs) = gather_inputs(from_node, amount + fee * 2)
-    outputs = make_change(from_node, total_in, amount + fee, fee)
-    outputs[self_address] = float(amount + fee)
-
-    self_rawtx = from_node.createrawtransaction(inputs, outputs)
-    self_signresult = from_node.signrawtransactionwithwallet(self_rawtx)
-    self_txid = from_node.sendrawtransaction(self_signresult["hex"], True)
-
-    vout = find_output(from_node, self_txid, amount + fee)
-    # Now immediately spend the output to create a 1-input, 1-output
-    # zero-priority transaction:
-    inputs = [{"txid": self_txid, "vout": vout}]
-    outputs = {to_node.getnewaddress(): float(amount)}
-
-    rawtx = from_node.createrawtransaction(inputs, outputs)
-    signresult = from_node.signrawtransactionwithwallet(rawtx)
-    txid = from_node.sendrawtransaction(signresult["hex"], True)
-
-    return (txid, signresult["hex"])
-
-
-def random_zeropri_transaction(nodes, amount, min_fee, fee_increment, fee_variants):
-    """
-    Create a random zero-priority transaction.
-    Returns (txid, hex-encoded-transaction-data, fee)
-    """
-    from_node = random.choice(nodes)
-    to_node = random.choice(nodes)
-    fee = min_fee + fee_increment * random.randint(0, fee_variants)
-    (txid, txhex) = send_zeropri_transaction(from_node, to_node, amount, fee)
-    return (txid, txhex, fee)
 
 
 def random_transaction(nodes, amount, min_fee, fee_increment, fee_variants):
@@ -601,15 +563,6 @@ def gen_return_txouts():
         # add script_pubkey
         txouts = txouts + script_pubkey
     return txouts
-
-
-def create_tx(node, coinbase, to_address, amount):
-    inputs = [{"txid": coinbase, "vout": 0}]
-    outputs = {to_address: amount}
-    rawtx = node.createrawtransaction(inputs, outputs)
-    signresult = node.signrawtransactionwithwallet(rawtx)
-    assert_equal(signresult["complete"], True)
-    return signresult["hex"]
 
 # Create a spend of each passed-in utxo, splicing in "txouts" to each raw
 # transaction to make it large.  See gen_return_txouts() above.

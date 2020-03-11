@@ -51,12 +51,13 @@ for folder in folders:
             try:
                 subprocess.call([pngcrush, "-brute", "-ow", "-rem", "gAMA", "-rem", "cHRM", "-rem", "iCCP", "-rem", "sRGB",
                                  "-rem", "alla", "-rem", "text", file_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            except:
+            except OSError:
                 print("pngcrush is not installed, aborting...")
                 sys.exit(0)
 
             # verify
-            if "Not a PNG file" in subprocess.check_output([pngcrush, "-n", "-v", file_path], stderr=subprocess.STDOUT, universal_newlines=True):
+            if "Not a PNG file" in subprocess.check_output(
+                    [pngcrush, "-n", "-v", file_path], stderr=subprocess.STDOUT, universal_newlines=True):
                 print("PNG file " + file +
                       " is corrupted after crushing, check out pngcursh version")
                 sys.exit(1)

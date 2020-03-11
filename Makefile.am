@@ -45,8 +45,7 @@ DIST_DOCS = $(wildcard doc/*.md) $(wildcard doc/release-notes/*.md)
 DIST_CONTRIB = $(top_srcdir)/contrib/bitcoin-cli.bash-completion \
 	       $(top_srcdir)/contrib/bitcoin-tx.bash-completion \
 	       $(top_srcdir)/contrib/bitcoind.bash-completion \
-	       $(top_srcdir)/contrib/init \
-	       $(top_srcdir)/contrib/rpm
+	       $(top_srcdir)/contrib/init
 DIST_SHARE = \
   $(top_srcdir)/share/genbuild.sh \
   $(top_srcdir)/share/rpcauth
@@ -88,7 +87,7 @@ $(OSX_APP)/Contents/PkgInfo:
 
 $(OSX_APP)/Contents/Resources/empty.lproj:
 	$(MKDIR_P) $(@D)
-	@touch $@ 
+	@touch $@
 
 $(OSX_APP)/Contents/Info.plist: $(OSX_PLIST)
 	$(MKDIR_P) $(@D)
@@ -175,13 +174,22 @@ $(BITCOIN_SEEDER_BIN): FORCE
 	$(MAKE) -C src $(@F)
 
 if USE_LCOV
-LCOV_FILTER_PATTERN=-p "/usr/include/" -p "src/leveldb/" -p "src/bench/" -p "src/univalue" -p "src/crypto/ctaes" -p "src/secp256k1"
+LCOV_FILTER_PATTERN = \
+	-p "/usr/include/" \
+	-p "/usr/lib/" \
+	-p "/usr/lib64/" \
+	-p "src/leveldb/" \
+	-p "src/bench/" \
+	-p "src/univalue" \
+	-p "src/crypto/ctaes" \
+	-p "src/secp256k1" \
+	-p "depends"
 
 baseline.info:
 	$(LCOV) -c -i -d $(abs_builddir)/src -o $@
 
 baseline_filtered.info: baseline.info
-	$(abs_builddir)/contrib/filter-lcov.py $(LCOV_FILTER_PATTERN) $< $@
+	$(top_srcdir)/cmake/utils/filter-lcov.py $(LCOV_FILTER_PATTERN) $< $@
 	$(LCOV) -a $@ $(LCOV_OPTS) -o $@
 
 test_bitcoin.info: baseline_filtered.info
@@ -190,16 +198,16 @@ test_bitcoin.info: baseline_filtered.info
 	$(LCOV) -z $(LCOV_OPTS) -d $(abs_builddir)/src
 
 test_bitcoin_filtered.info: test_bitcoin.info
-	$(abs_builddir)/contrib/filter-lcov.py $(LCOV_FILTER_PATTERN) $< $@
+	$(top_srcdir)/cmake/utils/filter-lcov.py $(LCOV_FILTER_PATTERN) $< $@
 	$(LCOV) -a $@ $(LCOV_OPTS) -o $@
 
 functional_test.info: test_bitcoin_filtered.info
-	-@TIMEOUT=15 test/functional/test_runner.py $(EXTENDED_FUNCTIONAL_TESTS)
+	@TIMEOUT=15 test/functional/test_runner.py $(EXTENDED_FUNCTIONAL_TESTS)
 	$(LCOV) -c $(LCOV_OPTS) -d $(abs_builddir)/src --t functional-tests -o $@
 	$(LCOV) -z $(LCOV_OPTS) -d $(abs_builddir)/src
 
 functional_test_filtered.info: functional_test.info
-	$(abs_builddir)/contrib/filter-lcov.py $(LCOV_FILTER_PATTERN) $< $@
+	$(top_srcdir)/cmake/utils/filter-lcov.py $(LCOV_FILTER_PATTERN) $< $@
 	$(LCOV) -a $@ $(LCOV_OPTS) -o $@
 
 test_bitcoin_coverage.info: baseline_filtered.info test_bitcoin_filtered.info

@@ -1,4 +1,4 @@
-// Copyright (c) 2017 The Bitcoin developers
+// Copyright (c) 2017-2020 The Bitcoin developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -128,7 +128,9 @@ BOOST_AUTO_TEST_CASE(invalid_on_wrong_network) {
 
     for (auto net : GetNetworks()) {
         for (auto otherNet : GetNetworks()) {
-            if (net == otherNet) continue;
+            if (net == otherNet) {
+                continue;
+            }
 
             const auto netParams = CreateChainParams(net);
             std::string encoded = EncodeCashAddr(dst, *netParams);
@@ -322,6 +324,12 @@ BOOST_AUTO_TEST_CASE(test_vectors) {
         {"prefix", CashAddrType(15),
          ParseHex("F5BF48B397DAE70BE82B3CCA4793F8EB2B6CDAC9"),
          "prefix:0r6m7j9njldwwzlg9v7v53unlr4jkmx6ey3qnjwsrf"},
+        {"bchreg", PUBKEY_TYPE,
+         ParseHex("d85c2b71d0060b09c9886aeb815e50991dda124d"),
+         "bchreg:qrv9c2m36qrqkzwf3p4whq272zv3mksjf5ln6v9le5"},
+        {"bchreg", PUBKEY_TYPE,
+         ParseHex("00aea9a2e5f0f876a588df5546e8742d1d87008f"),
+         "bchreg:qqq2a2dzuhc0sa493r0423hgwsk3mpcq3upac4z3wr"},
         // 24 bytes
         {"bitcoincash", PUBKEY_TYPE,
          ParseHex("7ADBF6C17084BC86C1706827B41A56F5CA32865925E946EA"),

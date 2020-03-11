@@ -1,6 +1,5 @@
 # Copyright (c) 2017 The Bitcoin developers
 
-cmake_minimum_required(VERSION 3.12)
 project(bitcoind)
 
 set(CMAKE_CXX_STANDARD 14)
@@ -15,54 +14,74 @@ option(BUILD_BITCOIN_SEEDER "Build bitcoin-seeder" ON)
 option(BUILD_BITCOIN_CLI "Build bitcoin-cli" ON)
 option(BUILD_BITCOIN_TX "Build bitcoin-tx" ON)
 option(BUILD_BITCOIN_QT "Build bitcoin-qt" ON)
+option(BUILD_LIBBITCOINCONSENSUS "Build the bitcoinconsenus shared library" ON)
+option(ENABLE_BIP70 "Enable BIP70 (payment protocol) support in GUI" ON)
 option(ENABLE_HARDENING "Harden the executables" ON)
 option(ENABLE_REDUCE_EXPORTS "Reduce the amount of exported symbols" OFF)
 option(ENABLE_STATIC_LIBSTDCXX "Statically link libstdc++" OFF)
 option(ENABLE_GLIBC_BACK_COMPAT "Enable Glibc compatibility features" OFF)
 option(ENABLE_QRCODE "Enable QR code display" ON)
 option(ENABLE_UPNP "Enable UPnP support" ON)
+option(ENABLE_NOTIFICATIONS "Enable desktop notifications" ON)
+option(ENABLE_WERROR "Promote some compiler warnings to errors" OFF)
 option(START_WITH_UPNP "Make UPnP the default to map ports" OFF)
+option(ENABLE_CLANG_TIDY "Enable clang-tidy checks for Bitcoin ABC" OFF)
+option(ENABLE_PROFILING "Select the profiling tool to use" OFF)
 
-# Allow usage of sanitizers by setting ECM_ENABLE_SANITIZERS
-if(ENABLE_SANITIZERS)
-	set(ECM_ENABLE_SANITIZERS ${ENABLE_SANITIZERS})
-	find_package(ECM NO_MODULE)
-	if(ECM_MODULE_PATH)
-		list(APPEND CMAKE_MODULE_PATH ${ECM_MODULE_PATH})
-		include(ECMEnableSanitizers)
-	else()
-		message(FATAL_ERROR
-			"ECM is required to enable the sanitizers (https://api.kde.org/ecm/index.html)"
-		)
-	endif()
+# If ccache is available, then use it.
+find_program(CCACHE ccache)
+if(CCACHE)
+	message(STATUS "Using ccache: ${CCACHE}")
+	set(CMAKE_C_COMPILER_LAUNCHER ${CCACHE})
+	set(CMAKE_CXX_COMPILER_LAUNCHER ${CCACHE})
+endif(CCACHE)
+
+# Disable what we do not need for the native build.
+include(NativeExecutable)
+native_add_cmake_flags(
+	"-DBUILD_BITCOIN_WALLET=OFF"
+	"-DBUILD_BITCOIN_QT=OFF"
+	"-DBUILD_BITCOIN_ZMQ=OFF"
+	"-DENABLE_QRCODE=OFF"
+	"-DENABLE_UPNP=OFF"
+	# Forward the current setting for clang-tidy
+	"-DENABLE_CLANG_TIDY=${ENABLE_CLANG_TIDY}"
+)
+
+if(ENABLE_CLANG_TIDY)
+	include(ClangTidy)
 endif()
 
-# Cmake uses the CMAKE_BUILD_TYPE variable to select the build configuration.
-# By default it supports more configurations that needed for Bitcoin ABC, and
-# all the releases types set NDEBUG which is unwanted as it disables the assert
-# completely.
-# Remove the -DNDEBUG flag from the CFLAGS/CXXFLAGS in all the configurations
-include(AddCompilerFlags)
-remove_compiler_flags(-DNDEBUG)
+if(ENABLE_SANITIZERS)
+	include(Sanitizers)
+	enable_sanitizers(${ENABLE_SANITIZERS})
+endif()
 
-# Overrides the flags for the Debug build type
-# This mimics the autotools behavior by setting the CFLAGS to '-g -O2`, which
-# are not well suited for debugging.
-# FIXME: update CFLAGS with better debug oriented optimization flags
-set(CMAKE_C_FLAGS_DEBUG "-g -O2")
+include(AddCompilerFlags)
 
 # Prefer -g3, defaults to -g if unavailable
-add_cxx_compiler_flag_with_fallback(CMAKE_CXX_FLAGS_DEBUG -g3 -g)
-
-# Prefer -Og, defaults to -O0 if unavailable
-add_cxx_compiler_flag_with_fallback(CMAKE_CXX_FLAGS_DEBUG -Og -O0)
+foreach(LANGUAGE C CXX)
+	set(COMPILER_DEBUG_LEVEL -g)
+	check_compiler_flag(G3_IS_SUPPORTED ${LANGUAGE} -g3)
+	if(${G3_IS_SUPPORTED})
+		set(COMPILER_DEBUG_LEVEL -g3)
+	endif()
+	add_compile_options_to_configuration_for_language(Debug ${LANGUAGE} ${COMPILER_DEBUG_LEVEL})
+endforeach()
 
 # Define the debugging symbols DEBUG and DEBUG_LOCKORDER when the Debug build
 # type is selected.
-string(APPEND CMAKE_CXX_FLAGS_DEBUG " -DDEBUG -DDEBUG_LOCKORDER")
+add_compile_definitions_to_configuration(Debug DEBUG DEBUG_LOCKORDER)
 
 # Add -ftrapv when building in Debug
-add_compiler_flags_to_var(CMAKE_CXX_FLAGS_DEBUG CXX -ftrapv)
+add_compile_options_to_configuration(Debug -ftrapv)
+
+# All versions of gcc that we commonly use for building are subject to bug
+# https://gcc.gnu.org/bugzilla/show_bug.cgi?id=90348. To work around that, set
+# -fstack-reuse=none for all gcc builds. (Only gcc understands this flag)
+if(NOT ENABLE_CLANG_TIDY)
+	add_compiler_flags(-fstack-reuse=none)
+endif()
 
 # Ensure that WINDRES_PREPROC is enabled when using windres.
 if(${CMAKE_SYSTEM_NAME} MATCHES "Windows")
@@ -70,11 +89,11 @@ if(${CMAKE_SYSTEM_NAME} MATCHES "Windows")
 	list(APPEND CMAKE_RC_FLAGS "-DWINDRES_PREPROC")
 
 	# Build all static so there is no dll file to distribute.
-	add_compiler_flags(-static)
+	add_linker_flags(-static)
 endif()
 
 if(${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
-	add_definitions(-DMAC_OSX)
+	add_compile_definitions(MAC_OSX OBJC_OLD_DISPATCH_PROTOTYPES=0)
 endif()
 
 if(ENABLE_REDUCE_EXPORTS)
@@ -120,7 +139,6 @@ if(ENABLE_HARDENING)
 		include(CheckPIESupported)
 		check_pie_supported()
 	elseif(NOT ${CMAKE_SYSTEM_NAME} MATCHES "Windows")
-		add_compiler_flags(-fPIE)
 		add_linker_flags(-pie)
 	endif()
 
@@ -128,6 +146,22 @@ if(ENABLE_HARDENING)
 		# MinGw provides its own libssp for stack smashing protection
 		link_libraries(ssp)
 	endif()
+endif()
+
+if(ENABLE_PROFILING MATCHES "gprof")
+	message(STATUS "Enable profiling with gprof")
+
+	# -pg is incompatible with -pie. Since hardening and profiling together
+	# doesn't make sense, we simply make them mutually exclusive here.
+	# Additionally, hardened toolchains may force -pie by default, in which
+	# case it needs to be turned off with -no-pie.
+	if(ENABLE_HARDENING)
+		message(FATAL_ERROR "Profiling with gprof requires disabling hardening with -DENABLE_HARDENING=OFF.")
+	endif()
+	add_linker_flags(-no-pie)
+
+	add_compiler_flags(-pg)
+	add_linker_flags(-pg)
 endif()
 
 # Enable warning
@@ -156,6 +190,13 @@ else()
 	add_compiler_flags(-Wno-implicit-fallthrough)
 endif()
 
+if(ENABLE_WERROR)
+	add_compiler_flags(
+		-Werror=vla
+		-Werror=thread-safety-analysis
+	)
+endif()
+
 # Create a target for OpenSSL
 include(BrewHelper)
 find_brew_prefix(OPENSSL_ROOT_DIR openssl)
@@ -181,6 +222,7 @@ function(find_git_head_logs_file RESULT)
 			OUTPUT_VARIABLE GIT_ROOT
 			RESULT_VARIABLE GIT_RESULT
 			OUTPUT_STRIP_TRAILING_WHITESPACE
+			ERROR_QUIET
 		)
 
 		if(GIT_RESULT EQUAL 0)
@@ -267,31 +309,6 @@ if(ENABLE_GLIBC_BACK_COMPAT)
 	find_library(RT_LIBRARY rt)
 	target_link_libraries(util ${RT_LIBRARY})
 
-	#__fdelt_chk's params and return type have changed from long unsigned int to
-	# long int. See which one is present here.
-	include(CheckPrototypeDefinition)
-
-	set(CMAKE_REQUIRED_DEFINITIONS -D_FORTIFY_SOURCE=2)
-	# Without some optimization the compiler won't detect the prototype conflict
-	# and always succeed to build.
-	set(CMAKE_REQUIRED_FLAGS -O2)
-
-	check_prototype_definition(
-		__fdelt_warn
-		"extern long unsigned int __fdelt_warn(long unsigned int a)"
-		"0"
-		"sys/select.h"
-		FDELT_PROTOTYPE_LONG_UNSIGNED_INT
-	)
-
-	if(FDELT_PROTOTYPE_LONG_UNSIGNED_INT)
-		set(FDELT_TYPE "long unsigned int")
-	else()
-		set(FDELT_TYPE "long int")
-	endif()
-
-	target_compile_definitions(util PRIVATE "-DFDELT_TYPE=${FDELT_TYPE}")
-
 	# Wrap some glibc functions with ours
 	add_linker_flags(-Wl,--wrap=__divmoddi4)
 	add_linker_flags(-Wl,--wrap=log2f)
@@ -367,6 +384,7 @@ add_library(common
 	primitives/block.cpp
 	protocol.cpp
 	scheduler.cpp
+	versionbitsinfo.cpp
 	warnings.cpp
 )
 
@@ -374,8 +392,8 @@ target_link_libraries(common util secp256k1)
 
 # script library
 add_library(script
-	script/bitcoinconsensus.cpp
 	script/bitfield.cpp
+	script/descriptor.cpp
 	script/interpreter.cpp
 	script/ismine.cpp
 	script/script.cpp
@@ -399,6 +417,20 @@ add_library(bitcoinconsensus
 
 target_link_libraries(bitcoinconsensus script)
 
+include(InstallationHelper)
+if(BUILD_LIBBITCOINCONSENSUS)
+	target_compile_definitions(bitcoinconsensus
+		PUBLIC
+			BUILD_BITCOIN_INTERNAL
+			HAVE_CONSENSUS_LIB
+	)
+
+	install_shared_library(bitcoinconsensus
+		script/bitcoinconsensus.cpp
+		PUBLIC_HEADER script/bitcoinconsensus.h
+	)
+endif()
+
 # Bitcoin server facilities
 add_library(server
 	addrdb.cpp
@@ -413,6 +445,7 @@ add_library(server
 	config.cpp
 	consensus/activation.cpp
 	consensus/tx_verify.cpp
+	dbwrapper.cpp
 	flatfile.cpp
 	globals.cpp
 	httprpc.cpp
@@ -420,15 +453,18 @@ add_library(server
 	index/base.cpp
 	index/txindex.cpp
 	init.cpp
+	interfaces/chain.cpp
 	interfaces/handler.cpp
 	interfaces/node.cpp
-	dbwrapper.cpp
 	merkleblock.cpp
 	miner.cpp
+	minerfund.cpp
 	net.cpp
 	net_processing.cpp
 	noui.cpp
+	outputtype.cpp
 	policy/fees.cpp
+	policy/mempool.cpp
 	policy/policy.cpp
 	pow.cpp
 	rest.cpp
@@ -443,6 +479,7 @@ add_library(server
 	rpc/server.cpp
 	script/scriptcache.cpp
 	script/sigcache.cpp
+	shutdown.cpp
 	timedata.cpp
 	torcontrol.cpp
 	txdb.cpp
@@ -450,19 +487,26 @@ add_library(server
 	ui_interface.cpp
 	validation.cpp
 	validationinterface.cpp
+	versionbits.cpp
 )
-
-# This require libevent
-find_package(Event REQUIRED)
 
 target_include_directories(server PRIVATE leveldb/helpers/memenv)
 
+# This require libevent
+set(EVENT_MIN_VERSION 2.0.22)
+find_package(Event ${EVENT_MIN_VERSION} REQUIRED COMPONENTS event)
+
 target_link_libraries(server
-	Event
+	Event::event
 	bitcoinconsensus
 	leveldb
 	memenv
 )
+
+if(NOT ${CMAKE_SYSTEM_NAME} MATCHES "Windows")
+	find_package(Event ${EVENT_MIN_VERSION} REQUIRED COMPONENTS pthreads)
+	target_link_libraries(server Event::pthreads)
+endif()
 
 if(ENABLE_UPNP)
 	target_include_directories(server PUBLIC ${MINIUPNPC_INCLUDE_DIR})
@@ -492,6 +536,11 @@ add_subdirectory(bench)
 if(BUILD_BITCOIN_WALLET)
 	add_subdirectory(wallet)
 	target_link_libraries(server wallet)
+	# There is a circular dependency between wallet and server, see:
+	# https://github.com/bitcoin/bitcoin/pull/14437#discussion_r226237048
+	target_link_libraries(wallet server)
+else()
+	target_sources(server PRIVATE dummywallet.cpp)
 endif()
 
 # ZeroMQ
@@ -510,7 +559,6 @@ if(BUILD_BITCOIN_SEEDER)
 endif()
 
 include(BinaryTest)
-include(InstallationHelper)
 
 # bitcoin-cli
 if(BUILD_BITCOIN_CLI)
@@ -519,7 +567,7 @@ if(BUILD_BITCOIN_CLI)
 		target_sources(bitcoin-cli PRIVATE bitcoin-cli-res.rc)
 	endif()
 
-	target_link_libraries(bitcoin-cli common rpcclient Event)
+	target_link_libraries(bitcoin-cli common rpcclient Event::event)
 
 	add_to_symbols_check(bitcoin-cli)
 	add_to_security_check(bitcoin-cli)

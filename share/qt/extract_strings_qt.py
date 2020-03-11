@@ -57,7 +57,9 @@ files = sys.argv[1:]
 # xgettext -n --keyword=_ $FILES
 XGETTEXT = os.getenv('XGETTEXT', 'xgettext')
 if not XGETTEXT:
-    print('Cannot extract strings: xgettext utility is not installed or not configured.', file=sys.stderr)
+    print(
+        'Cannot extract strings: xgettext utility is not installed or not configured.',
+        file=sys.stderr)
     print('Please install package "gettext" and re-run \'./configure\'.',
           file=sys.stderr)
     sys.exit(1)
@@ -80,11 +82,11 @@ f.write("""
 #endif
 """)
 f.write('static const char UNUSED *bitcoin_strings[] = {\n')
-f.write('QT_TRANSLATE_NOOP("bitcoin-core", "{}"),\n'.format((os.getenv('PACKAGE_NAME'),)))
-f.write('QT_TRANSLATE_NOOP("bitcoin-core", "{}"),\n'.format((os.getenv('COPYRIGHT_HOLDERS'),)))
+f.write('QT_TRANSLATE_NOOP("bitcoin-core", "{}"),\n'.format(os.getenv('PACKAGE_NAME'),))
+f.write('QT_TRANSLATE_NOOP("bitcoin-core", "{}"),\n'.format(os.getenv('COPYRIGHT_HOLDERS'),))
 if os.getenv('COPYRIGHT_HOLDERS_SUBSTITUTION') != os.getenv('PACKAGE_NAME'):
     f.write('QT_TRANSLATE_NOOP("bitcoin-core", "{}"),\n'.format(
-        (os.getenv('COPYRIGHT_HOLDERS_SUBSTITUTION'),)))
+        os.getenv('COPYRIGHT_HOLDERS_SUBSTITUTION'),))
 messages.sort(key=operator.itemgetter(0))
 for (msgid, msgstr) in messages:
     if msgid != EMPTY:

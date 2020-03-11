@@ -14,6 +14,7 @@
 #include <config/bitcoin-config.h>
 #endif
 
+#include <attributes.h>
 #include <compat.h>
 #include <compat/assumptions.h>
 #include <fs.h>
@@ -55,7 +56,7 @@ void SetupEnvironment();
 bool SetupNetworking();
 
 template <typename... Args> bool error(const char *fmt, const Args &... args) {
-    LogPrintf("ERROR: " + tfm::format(fmt, args...) + "\n");
+    LogPrintf("ERROR: %s\n", tfm::format(fmt, args...));
     return false;
 }
 
@@ -67,6 +68,8 @@ void AllocateFileRange(FILE *file, unsigned int offset, unsigned int length);
 bool RenameOver(fs::path src, fs::path dest);
 bool LockDirectory(const fs::path &directory, const std::string lockfile_name,
                    bool probe_only = false);
+void UnlockDirectory(const fs::path &directory,
+                     const std::string &lockfile_name);
 bool DirIsWritable(const fs::path &directory);
 bool CheckDiskSpace(const fs::path &dir, uint64_t additional_bytes = 0);
 
@@ -91,6 +94,8 @@ void CreatePidFile(const fs::path &path, pid_t pid);
 fs::path GetSpecialFolderPath(int nFolder, bool fCreate = true);
 #endif
 void runCommand(const std::string &strCommand);
+
+NODISCARD bool ParseKeyValue(std::string &key, std::string &val);
 
 /**
  * Most paths passed as configuration arguments are treated as relative to
@@ -145,11 +150,14 @@ protected:
     };
 
     mutable CCriticalSection cs_args;
-    std::map<std::string, std::vector<std::string>> m_override_args;
-    std::map<std::string, std::vector<std::string>> m_config_args;
-    std::string m_network;
-    std::set<std::string> m_network_only_args;
-    std::map<OptionsCategory, std::map<std::string, Arg>> m_available_args;
+    std::map<std::string, std::vector<std::string>>
+        m_override_args GUARDED_BY(cs_args);
+    std::map<std::string, std::vector<std::string>>
+        m_config_args GUARDED_BY(cs_args);
+    std::string m_network GUARDED_BY(cs_args);
+    std::set<std::string> m_network_only_args GUARDED_BY(cs_args);
+    std::map<OptionsCategory, std::map<std::string, Arg>>
+        m_available_args GUARDED_BY(cs_args);
 
     bool ReadConfigStream(std::istream &stream, std::string &error,
                           bool ignore_invalid_keys = false);
@@ -162,8 +170,8 @@ public:
      */
     void SelectConfigNetwork(const std::string &network);
 
-    bool ParseParameters(int argc, const char *const argv[],
-                         std::string &error);
+    NODISCARD bool ParseParameters(int argc, const char *const argv[],
+                                   std::string &error);
     bool ReadConfigFiles(std::string &error, bool ignore_invalid_keys = false);
 
     /**
@@ -270,9 +278,17 @@ public:
     void ClearArg(const std::string &strArg);
 
     /**
+     * Add many hidden arguments
+     */
+    void AddHiddenArgs(const std::vector<std::string> &args);
+
+    /**
      * Clear available arguments
      */
-    void ClearArgs() { m_available_args.clear(); }
+    void ClearArgs() {
+        LOCK(cs_args);
+        m_available_args.clear();
+    }
 
     /**
      * Get the help string

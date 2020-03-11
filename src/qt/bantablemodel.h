@@ -10,6 +10,8 @@
 #include <QAbstractTableModel>
 #include <QStringList>
 
+#include <memory>
+
 class ClientModel;
 class BanTablePriv;
 
@@ -41,7 +43,8 @@ class BanTableModel : public QAbstractTableModel {
     Q_OBJECT
 
 public:
-    explicit BanTableModel(interfaces::Node &node, ClientModel *parent = 0);
+    explicit BanTableModel(interfaces::Node &node,
+                           ClientModel *parent = nullptr);
     ~BanTableModel();
     void startAutoRefresh();
     void stopAutoRefresh();

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright (c) 2014-2017 The Bitcoin Core developers
+# Copyright (c) 2014-2019 The Bitcoin Core developers
 # Distributed under the MIT software license, see the accompanying
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
 """Test the rawtranscation RPCs.
@@ -16,7 +16,14 @@ from decimal import Decimal
 
 from collections import OrderedDict
 from io import BytesIO
-from test_framework.messages import CTransaction, ToHex
+from test_framework.messages import (
+    COutPoint,
+    CTransaction,
+    CTxIn,
+    CTxOut,
+    ToHex,
+)
+from test_framework.script import CScript
 from test_framework.test_framework import BitcoinTestFramework
 from test_framework.txtools import pad_raw_tx
 from test_framework.util import (
@@ -25,7 +32,6 @@ from test_framework.util import (
     assert_raises_rpc_error,
     connect_nodes_bi,
     hex_str_to_bytes,
-    bytes_to_hex_str,
 )
 
 
@@ -51,7 +57,10 @@ class RawTransactionsTest(BitcoinTestFramework):
         self.setup_clean_chain = True
         self.num_nodes = 3
 
-    def setup_network(self, split=False):
+    def skip_test_if_missing_module(self):
+        self.skip_if_no_wallet()
+
+    def setup_network(self):
         super().setup_network()
         connect_nodes_bi(self.nodes[0], self.nodes[2])
 
@@ -93,10 +102,21 @@ class RawTransactionsTest(BitcoinTestFramework):
                                 self.nodes[0].createrawtransaction, 'foo', {})
         assert_raises_rpc_error(-1, "JSON value is not an object as expected",
                                 self.nodes[0].createrawtransaction, ['foo'], {})
-        assert_raises_rpc_error(-8, "txid must be hexadecimal string",
-                                self.nodes[0].createrawtransaction, [{}], {})
-        assert_raises_rpc_error(-8, "txid must be hexadecimal string",
-                                self.nodes[0].createrawtransaction, [{'txid': 'foo'}], {})
+        assert_raises_rpc_error(-1,
+                                "JSON value is not a string as expected",
+                                self.nodes[0].createrawtransaction,
+                                [{}],
+                                {})
+        assert_raises_rpc_error(-8,
+                                "txid must be of length 64 (not 3, for 'foo')",
+                                self.nodes[0].createrawtransaction,
+                                [{'txid': 'foo'}],
+                                {})
+        assert_raises_rpc_error(-8,
+                                "txid must be hexadecimal string (not 'ZZZ7bb8b1697ea987f3b223ba7819250cae33efacb068d23dc24859824a77844')",
+                                self.nodes[0].createrawtransaction,
+                                [{'txid': 'ZZZ7bb8b1697ea987f3b223ba7819250cae33efacb068d23dc24859824a77844'}],
+                                {})
         assert_raises_rpc_error(-8, "Invalid parameter, missing vout key",
                                 self.nodes[0].createrawtransaction, [{'txid': txid}], {})
         assert_raises_rpc_error(-8, "Invalid parameter, vout must be a number",
@@ -147,7 +167,7 @@ class RawTransactionsTest(BitcoinTestFramework):
             inputs=[{'txid': txid, 'vout': 9}], outputs={address: 99}))))
         assert_equal(len(tx.vout), 1)
         assert_equal(
-            bytes_to_hex_str(tx.serialize()),
+            tx.serialize().hex(),
             self.nodes[2].createrawtransaction(
                 inputs=[{'txid': txid, 'vout': 9}], outputs=[{address: 99}]),
         )
@@ -156,7 +176,7 @@ class RawTransactionsTest(BitcoinTestFramework):
                        {'txid': txid, 'vout': 9}], outputs=OrderedDict([(address, 99), (address2, 99)])))))
         assert_equal(len(tx.vout), 2)
         assert_equal(
-            bytes_to_hex_str(tx.serialize()),
+            tx.serialize().hex(),
             self.nodes[2].createrawtransaction(inputs=[{'txid': txid, 'vout': 9}], outputs=[
                                                {address: 99}, {address2: 99}]),
         )
@@ -165,7 +185,7 @@ class RawTransactionsTest(BitcoinTestFramework):
                        {'txid': txid, 'vout': 9}], outputs=multidict([('data', '99'), ('data', '99')])))))
         assert_equal(len(tx.vout), 2)
         assert_equal(
-            bytes_to_hex_str(tx.serialize()),
+            tx.serialize().hex(),
             self.nodes[2].createrawtransaction(inputs=[{'txid': txid, 'vout': 9}], outputs=[
                                                {'data': '99'}, {'data': '99'}]),
         )
@@ -174,7 +194,7 @@ class RawTransactionsTest(BitcoinTestFramework):
                        {'txid': txid, 'vout': 9}], outputs=multidict([(address, 99), ('data', '99'), ('data', '99')])))))
         assert_equal(len(tx.vout), 3)
         assert_equal(
-            bytes_to_hex_str(tx.serialize()),
+            tx.serialize().hex(),
             self.nodes[2].createrawtransaction(inputs=[{'txid': txid, 'vout': 9}], outputs=[
                                                {address: 99}, {'data': '99'}, {'data': '99'}]),
         )
@@ -200,11 +220,13 @@ class RawTransactionsTest(BitcoinTestFramework):
         tx = self.nodes[2].sendtoaddress(self.nodes[1].getnewaddress(), 1)
         block1, block2 = self.nodes[2].generate(2)
         self.sync_all()
-        # We should be able to get the raw transaction by providing the correct block
+        # We should be able to get the raw transaction by providing the correct
+        # block
         gottx = self.nodes[0].getrawtransaction(tx, True, block1)
         assert_equal(gottx['txid'], tx)
         assert_equal(gottx['in_active_chain'], True)
-        # We should not have the 'in_active_chain' flag when we don't provide a block
+        # We should not have the 'in_active_chain' flag when we don't provide a
+        # block
         gottx = self.nodes[0].getrawtransaction(tx, True)
         assert_equal(gottx['txid'], tx)
         assert 'in_active_chain' not in gottx
@@ -212,12 +234,31 @@ class RawTransactionsTest(BitcoinTestFramework):
         assert_raises_rpc_error(-5, "No such transaction found",
                                 self.nodes[0].getrawtransaction, tx, True, block2)
         # An invalid block hash should raise the correct errors
-        assert_raises_rpc_error(-8, "parameter 3 must be hexadecimal",
-                                self.nodes[0].getrawtransaction, tx, True, True)
-        assert_raises_rpc_error(-8, "parameter 3 must be hexadecimal",
-                                self.nodes[0].getrawtransaction, tx, True, "foobar")
-        assert_raises_rpc_error(-8, "parameter 3 must be of length 64",
-                                self.nodes[0].getrawtransaction, tx, True, "abcd1234")
+        assert_raises_rpc_error(-1,
+                                "JSON value is not a string as expected",
+                                self.nodes[0].getrawtransaction,
+                                tx,
+                                True,
+                                True)
+        assert_raises_rpc_error(-8,
+                                "parameter 3 must be of length 64 (not 6, for 'foobar')",
+                                self.nodes[0].getrawtransaction,
+                                tx,
+                                True,
+                                "foobar")
+        assert_raises_rpc_error(-8,
+                                "parameter 3 must be of length 64 (not 8, for 'abcd1234')",
+                                self.nodes[0].getrawtransaction,
+                                tx,
+                                True,
+                                "abcd1234")
+        assert_raises_rpc_error(
+            -8,
+            "parameter 3 must be hexadecimal string (not 'ZZZ0000000000000000000000000000000000000000000000000000000000000')",
+            self.nodes[0].getrawtransaction,
+            tx,
+            True,
+            "ZZZ0000000000000000000000000000000000000000000000000000000000000")
         assert_raises_rpc_error(-5, "Block hash not found", self.nodes[0].getrawtransaction,
                                 tx, True, "0000000000000000000000000000000000000000000000000000000000000000")
         # Undo the blocks and check in_active_chain
@@ -244,7 +285,8 @@ class RawTransactionsTest(BitcoinTestFramework):
         # createmultisig can only take public keys
         self.nodes[0].createmultisig(
             2, [addr1Obj['pubkey'], addr2Obj['pubkey']])
-        # addmultisigaddress can take both pubkeys and addresses so long as they are in the wallet, which is tested here.
+        # addmultisigaddress can take both pubkeys and addresses so long as
+        # they are in the wallet, which is tested here.
         assert_raises_rpc_error(-5, "Invalid public key",
                                 self.nodes[0].createmultisig, 2, [addr1Obj['pubkey'], addr1])
 
@@ -382,7 +424,7 @@ class RawTransactionsTest(BitcoinTestFramework):
         self.nodes[0].generate(1)
         self.sync_all()
         assert_equal(self.nodes[0].getbalance(
-        ), bal+Decimal('50.00000000')+Decimal('2.19000000'))  # block reward + tx
+        ), bal + Decimal('50.00000000') + Decimal('2.19000000'))  # block reward + tx
 
         # getrawtransaction tests
         # 1. valid parameters - only supply txid
@@ -478,19 +520,45 @@ class RawTransactionsTest(BitcoinTestFramework):
         # TRANSACTION VERSION NUMBER TESTS #
         ####################################
 
-        # Test the minimum transaction version number that fits in a signed 32-bit integer.
+        # Test the minimum transaction version number that fits in a signed
+        # 32-bit integer.
         tx = CTransaction()
         tx.nVersion = -0x80000000
         rawtx = ToHex(tx)
         decrawtx = self.nodes[0].decoderawtransaction(rawtx)
         assert_equal(decrawtx['version'], -0x80000000)
 
-        # Test the maximum transaction version number that fits in a signed 32-bit integer.
+        # Test the maximum transaction version number that fits in a signed
+        # 32-bit integer.
         tx = CTransaction()
         tx.nVersion = 0x7fffffff
         rawtx = ToHex(tx)
         decrawtx = self.nodes[0].decoderawtransaction(rawtx)
         assert_equal(decrawtx['version'], 0x7fffffff)
+
+        ##########################################
+        # Decoding weird scripts in transactions #
+        ##########################################
+
+        self.log.info('Decode correctly-formatted but weird transactions')
+        tx = CTransaction()
+        # empty
+        self.nodes[0].decoderawtransaction(ToHex(tx))
+        # truncated push
+        tx.vin.append(CTxIn(COutPoint(42, 0), b'\x4e\x00\x00'))
+        tx.vin.append(CTxIn(COutPoint(42, 0), b'\x4c\x10TRUNC'))
+        tx.vout.append(CTxOut(0, b'\x4e\x00\x00'))
+        tx.vout.append(CTxOut(0, b'\x4c\x10TRUNC'))
+        self.nodes[0].decoderawtransaction(ToHex(tx))
+        # giant pushes and long scripts
+        tx.vin.append(
+            CTxIn(COutPoint(42, 0), CScript([b'giant push' * 10000])))
+        tx.vout.append(CTxOut(0, CScript([b'giant push' * 10000])))
+        self.nodes[0].decoderawtransaction(ToHex(tx))
+
+        self.log.info('Refuse garbage after transaction')
+        assert_raises_rpc_error(-22, 'TX decode failed',
+                                self.nodes[0].decoderawtransaction, ToHex(tx) + '00')
 
 
 if __name__ == '__main__':

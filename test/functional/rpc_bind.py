@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright (c) 2014-2016 The Bitcoin Core developers
+# Copyright (c) 2014-2019 The Bitcoin Core developers
 # Distributed under the MIT software license, see the accompanying
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
 """Test running bitcoind with the -rpcbind and -rpcallowip options."""
@@ -69,7 +69,8 @@ class RPCBindTest(BitcoinTestFramework):
         self.stop_nodes()
 
     def run_test(self):
-        # due to OS-specific network stats queries, this test works only on Linux
+        # due to OS-specific network stats queries, this test works only on
+        # Linux
         if not sys.platform.startswith('linux'):
             raise SkipTest("This test can only be run on Linux.")
 

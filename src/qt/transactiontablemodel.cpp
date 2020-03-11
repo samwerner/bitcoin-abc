@@ -20,6 +20,8 @@
 #include <util/system.h>
 #include <validation.h>
 
+#include <algorithm>
+
 #include <QColor>
 #include <QDateTime>
 #include <QDebug>
@@ -89,9 +91,9 @@ public:
                         QString::number(status);
 
         // Find bounds of this transaction in model
-        QList<TransactionRecord>::iterator lower = qLowerBound(
+        QList<TransactionRecord>::iterator lower = std::lower_bound(
             cachedWallet.begin(), cachedWallet.end(), txid, TxLessThan());
-        QList<TransactionRecord>::iterator upper = qUpperBound(
+        QList<TransactionRecord>::iterator upper = std::upper_bound(
             cachedWallet.begin(), cachedWallet.end(), txid, TxLessThan());
         int lowerIndex = (lower - cachedWallet.begin());
         int upperIndex = (upper - cachedWallet.begin());
@@ -191,7 +193,7 @@ public:
             }
             return rec;
         }
-        return 0;
+        return nullptr;
     }
 
     QString describe(interfaces::Node &node, interfaces::Wallet &wallet,
@@ -219,8 +221,8 @@ TransactionTableModel::TransactionTableModel(
                    walletModel->getOptionsModel()->getDisplayUnit());
     priv->refreshWallet(walletModel->wallet());
 
-    connect(walletModel->getOptionsModel(), SIGNAL(displayUnitChanged(int)),
-            this, SLOT(updateDisplayUnit()));
+    connect(walletModel->getOptionsModel(), &OptionsModel::displayUnitChanged,
+            this, &TransactionTableModel::updateDisplayUnit);
 
     subscribeToCoreSignals();
 }
@@ -406,7 +408,9 @@ TransactionTableModel::addressColor(const TransactionRecord *wtx) const {
             QString label =
                 walletModel->getAddressTableModel()->labelForAddress(
                     QString::fromStdString(wtx->address));
-            if (label.isEmpty()) return COLOR_BAREADDRESS;
+            if (label.isEmpty()) {
+                return COLOR_BAREADDRESS;
+            }
         } break;
         case TransactionRecord::SendToSelf:
             return COLOR_BAREADDRESS;

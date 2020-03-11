@@ -21,61 +21,83 @@ endif()
 # Create build ini file
 configure_file(config.ini.in config.ini @ONLY)
 
-
 ###
 # Setup symlinks for testing
 ###
-macro(make_link src dest)
-  add_custom_command(
-    OUTPUT "${dest}"
-    COMMAND ${CMAKE_COMMAND} -E create_symlink "${src}" "${dest}"
-    COMMENT "make_link ${src} -> ${dest}"
-    MAIN_DEPENDENCY "${src}"
-  )
-endmacro()
+include(SanitizeHelper)
+function(make_link file)
+	set(src "${CMAKE_CURRENT_SOURCE_DIR}/${file}")
+	set(dest "${CMAKE_CURRENT_BINARY_DIR}/${file}")
+	add_custom_command(
+		OUTPUT "${dest}"
+		COMMAND ${CMAKE_COMMAND} -E create_symlink "${src}" "${dest}"
+		COMMENT "link ${file}"
+		MAIN_DEPENDENCY "${src}"
+	)
+	# Add a phony target to make sure the files are linked by default.
+	sanitize_target_name("link-" "${file}" NAME)
+	add_custom_target(${NAME} ALL DEPENDS "${dest}")
+endfunction()
 
 file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/functional/)
 file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/util/)
 
-make_link(
-	${CMAKE_CURRENT_SOURCE_DIR}/functional/test_runner.py
-	${CMAKE_CURRENT_BINARY_DIR}/functional/test_runner.py
-)
-make_link(
-	${CMAKE_CURRENT_SOURCE_DIR}/functional/create_cache.py
-	${CMAKE_CURRENT_BINARY_DIR}/functional/create_cache.py
-)
-make_link(
-	${CMAKE_CURRENT_SOURCE_DIR}/util/bitcoin-util-test.py
-	${CMAKE_CURRENT_BINARY_DIR}/util/bitcoin-util-test.py
-)
-make_link(
-	${CMAKE_CURRENT_SOURCE_DIR}/util/rpcauth-test.py
-	${CMAKE_CURRENT_BINARY_DIR}/util/rpcauth-test.py
-)
+make_link(functional/test_runner.py)
+make_link(util/bitcoin-util-test.py)
+make_link(util/rpcauth-test.py)
 
-add_custom_target(check-functional
-	COMMAND
-		"${PYTHON_EXECUTABLE}"
-		./functional/test_runner.py
-	DEPENDS
-		../src/bitcoind
-		../src/bitcoin-cli
-		${CMAKE_CURRENT_BINARY_DIR}/functional/test_runner.py
-		${CMAKE_CURRENT_BINARY_DIR}/functional/create_cache.py
-)
+macro(add_functional_test_check TARGET COMMENT)
+	add_custom_target(${TARGET}
+		COMMENT "${COMMENT}"
+		COMMAND
+			"${Python_EXECUTABLE}"
+			./functional/test_runner.py
+			${ARGN}
+		DEPENDS
+			bitcoind
+			bitcoin-cli
+			${CMAKE_CURRENT_BINARY_DIR}/functional/test_runner.py
+		USES_TERMINAL
+		VERBATIM
+	)
+endmacro()
 
+add_functional_test_check(check-functional
+	"Run the functional tests"
+)
 add_dependencies(check-all check-functional)
+
+add_functional_test_check(check-functional-extended
+	"Run the extended functional tests"
+	--extended
+)
+add_dependencies(check-extended check-functional-extended)
+
+set(TEST_SUITE_NAME_UPGRADE_ACTIVATED "Bitcoin ABC functional tests with the next upgrade activated")
+
+add_functional_test_check(check-functional-upgrade-activated
+	"Run the functional tests with the upgrade activated"
+	--with-phononactivation
+	-n "${TEST_SUITE_NAME_UPGRADE_ACTIVATED}"
+)
+add_dependencies(check-upgrade-activated check-functional-upgrade-activated)
+
+add_functional_test_check(check-functional-upgrade-activated-extended
+	"Run the extended functional tests with the upgrade activated"
+	--extended
+	--with-phononactivation
+	-n "${TEST_SUITE_NAME_UPGRADE_ACTIVATED}"
+)
+add_dependencies(check-upgrade-activated-extended check-functional-upgrade-activated-extended)
 
 if(BUILD_BITCOIN_TX)
 	add_custom_target(check-bitcoin-util
+		COMMENT "Test Bitcoin utilities..."
 		COMMAND
-			${CMAKE_COMMAND} -E echo "Running test/util/bitcoin-util-test.py..."
-		COMMAND
-			"${PYTHON_EXECUTABLE}"
+			"${Python_EXECUTABLE}"
 			./util/bitcoin-util-test.py
 		DEPENDS
-			../src/bitcoin-tx
+			bitcoin-tx
 			${CMAKE_CURRENT_BINARY_DIR}/util/bitcoin-util-test.py
 	)
 
@@ -83,10 +105,9 @@ if(BUILD_BITCOIN_TX)
 endif()
 
 add_custom_target(check-rpcauth
+	COMMENT "Test Bitcoin RPC authentication..."
 	COMMAND
-		${CMAKE_COMMAND} -E echo "Running test/util/rpcauth-test.py..."
-	COMMAND
-		"${PYTHON_EXECUTABLE}"
+		"${Python_EXECUTABLE}"
 		./util/rpcauth-test.py
 	DEPENDS
 		${CMAKE_CURRENT_BINARY_DIR}/util/rpcauth-test.py
